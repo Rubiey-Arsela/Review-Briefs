@@ -55,6 +55,10 @@ const API = {
     const { data } = await axios.get(`/api/briefs/${briefId}/compliance`)
     return data.issues
   },
+  async postComplianceReview(briefId, payload) {
+    const { data } = await axios.post(`/api/briefs/${briefId}/compliance/review`, payload)
+    return data
+  },
   async getRedundancy(briefId) {
     const { data } = await axios.get(`/api/briefs/${briefId}/redundancy`)
     return data.matches

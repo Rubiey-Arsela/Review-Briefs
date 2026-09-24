@@ -613,7 +613,31 @@ function showRowEditModal(briefId, row) {
 }
 
 // --- Compliance tab ----------------------------------------------------------
+const RULE_LABEL = {
+  banned_word: 'Banned word', impact_opener: 'Impact opener format', x_from_y: 'Missing "X from Y" base',
+  entity_generic: 'Generic Group reference', entity_alias: 'Entity name/ownership', no_source: 'Missing source', weak_language: 'Certainty language',
+  transmission_mechanism: 'Missing transmission mechanism', entity_missing_in_impact: 'No named business in Impact',
+  headline_summary_mismatch: 'Headline/Summary mismatch', abbreviation_expansion: 'Abbreviation not expanded',
+  entity_named_then_denied: 'Entity named then denied', regulatory_restates_other: 'Regulatory restates other cell',
+  regulatory_boilerplate: 'Regulatory cell is a bare dash', unnamed_attribution: 'Unnamed attribution',
+  source_in_impact: 'Source attribution in Impact', grade_perspective: 'Grade may be wrong perspective',
+  currency_spacing: 'Currency spacing',
+}
+
+// Local UI state for the compliance tab — remembers which sectors are
+// expanded and whether dismissed findings are shown, across re-renders
+// within the same brief-detail session (not persisted).
+const complianceUiState = { briefId: null, openSectors: new Set(), showDismissed: false, initialized: false }
+
 async function renderComplianceTab(el, brief) {
+  if (complianceUiState.briefId !== brief.id) {
+    // Switched to a different brief — reset the collapse/expand + dismissed
+    // view state instead of carrying over another brief's UI state.
+    complianceUiState.briefId = brief.id
+    complianceUiState.openSectors = new Set()
+    complianceUiState.showDismissed = false
+    complianceUiState.initialized = false
+  }
   el.innerHTML = `<div class="flex items-center justify-center py-10"><div class="spinner"></div></div>`
   const issues = await API.getCompliance(brief.id)
 
@@ -626,40 +650,148 @@ async function renderComplianceTab(el, brief) {
     return
   }
 
-  const bySeverity = { error: [], warning: [], info: [] }
-  for (const i of issues) bySeverity[i.severity]?.push(i)
+  const isDismissed = (i) => i.review_status === 'dismissed'
+  const activeIssues = issues.filter((i) => !isDismissed(i))
+  const dismissedIssues = issues.filter(isDismissed)
 
-  const ruleLabel = {
-    banned_word: 'Banned word', impact_opener: 'Impact opener format', x_from_y: 'Missing "X from Y" base',
-    entity_generic: 'Generic Group reference', entity_alias: 'Entity name/ownership', no_source: 'Missing source', weak_language: 'Certainty language',
-    transmission_mechanism: 'Missing transmission mechanism', entity_missing_in_impact: 'No named business in Impact',
-    headline_summary_mismatch: 'Headline/Summary mismatch', abbreviation_expansion: 'Abbreviation not expanded',
-    entity_named_then_denied: 'Entity named then denied', regulatory_restates_other: 'Regulatory restates other cell',
-    regulatory_boilerplate: 'Regulatory cell is a bare dash', unnamed_attribution: 'Unnamed attribution',
-    source_in_impact: 'Source attribution in Impact', grade_perspective: 'Grade may be wrong perspective',
-    currency_spacing: 'Currency spacing',
+  const bySeverity = { error: [], warning: [], info: [] }
+  for (const i of activeIssues) bySeverity[i.severity]?.push(i)
+
+  // Group ACTIVE issues by sector (brief-wide / row-less issues, e.g.
+  // abbreviation checks, fall into a "Brief-wide" bucket), then by row
+  // (headline) within each sector, so a reviewer can work sector-by-sector
+  // instead of scrolling one long flat list.
+  const bySector = {}
+  for (const i of activeIssues) {
+    const sector = i.sector || 'Brief-wide'
+    if (!bySector[sector]) bySector[sector] = []
+    bySector[sector].push(i)
+  }
+  const sectorOrder = SECTORS.filter((s) => bySector[s]).concat(
+    Object.keys(bySector).filter((s) => !SECTORS.includes(s) && s !== 'Brief-wide')
+  )
+  if (bySector['Brief-wide']) sectorOrder.push('Brief-wide')
+
+  // Default-open the first sector (and any sector containing an error) so
+  // the highest-priority findings are visible without extra clicks. Only
+  // done once per brief-detail session — after that, explicit user actions
+  // (toggle/expand/collapse) are the sole source of truth, so "Collapse all"
+  // actually stays collapsed on the next re-render (e.g. after a dismiss).
+  if (!complianceUiState.initialized) {
+    complianceUiState.initialized = true
+    for (const s of sectorOrder) {
+      if (bySector[s].some((i) => i.severity === 'error')) complianceUiState.openSectors.add(s)
+    }
+    if (complianceUiState.openSectors.size === 0 && sectorOrder.length > 0) complianceUiState.openSectors.add(sectorOrder[0])
   }
 
-  el.innerHTML = `
-    <div class="flex gap-3 mb-4">
-      <div class="card p-3 flex-1 text-center"><div class="text-2xl font-bold text-red-600">${bySeverity.error.length}</div><div class="text-xs text-slate-500">Errors</div></div>
-      <div class="card p-3 flex-1 text-center"><div class="text-2xl font-bold text-amber-600">${bySeverity.warning.length}</div><div class="text-xs text-slate-500">Warnings</div></div>
-      <div class="card p-3 flex-1 text-center"><div class="text-2xl font-bold text-blue-600">${bySeverity.info.length}</div><div class="text-xs text-slate-500">Info</div></div>
-    </div>
-    <div class="space-y-2">
-      ${issues.map((i) => `
-        <div class="card p-3 flex items-start gap-3">
-          <span class="badge badge-${i.severity} mt-0.5">${i.severity}</span>
-          <div class="flex-1">
-            <div class="text-sm font-semibold text-slate-700">${escapeHtml(ruleLabel[i.rule_code] || i.rule_code)} ${i.sector ? `<span class="text-slate-400 font-normal">· ${escapeHtml(i.sector)}</span>` : ''}</div>
-            <div class="text-sm text-slate-600 mt-0.5">${escapeHtml(i.message)}</div>
-            ${i.headline ? `<div class="text-xs text-slate-400 mt-1"><i class="fas fa-quote-left mr-1"></i>${escapeHtml(i.headline)}</div>` : ''}
-            ${i.excerpt ? `<div class="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 mt-1 font-mono text-slate-500">${escapeHtml(i.excerpt)}</div>` : ''}
-          </div>
+  const severityWeight = { error: 0, warning: 1, info: 2 }
+  const sectorSummary = (sector) => {
+    const items = bySector[sector]
+    const counts = { error: 0, warning: 0, info: 0 }
+    for (const i of items) counts[i.severity]++
+    return counts
+  }
+
+  const issueCard = (i) => `
+    <div class="card p-3 flex items-start gap-3 ${isDismissed(i) ? 'opacity-60' : ''}" data-issue-card data-fingerprint="${escapeHtml(i.fingerprint || '')}">
+      <span class="badge badge-${i.severity} mt-0.5">${i.severity}</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-semibold text-slate-700">
+          ${escapeHtml(RULE_LABEL[i.rule_code] || i.rule_code)}
+          ${isDismissed(i) ? `<span class="badge badge-neutral ml-1"><i class="fas fa-eye-slash"></i> Dismissed</span>` : ''}
         </div>
-      `).join('')}
+        ${i.headline ? `<div class="text-xs text-slate-500 mt-1 font-semibold"><i class="fas fa-quote-left mr-1 text-slate-300"></i>${escapeHtml(i.headline)}</div>` : ''}
+        <div class="text-sm text-slate-600 mt-0.5">${escapeHtml(i.message)}</div>
+        ${i.excerpt ? `<div class="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 mt-1 font-mono text-slate-500">${escapeHtml(i.excerpt)}</div>` : ''}
+        ${i.review_comment ? `<div class="text-xs text-slate-500 mt-1"><i class="fas fa-comment mr-1"></i>${escapeHtml(i.review_comment)}${i.review_by ? ` — ${escapeHtml(i.review_by)}` : ''}</div>` : ''}
+        <div class="mt-2 flex gap-2">
+          ${isDismissed(i)
+            ? `<button class="btn btn-secondary text-xs" data-reopen-issue><i class="fas fa-rotate-left"></i> Reopen</button>`
+            : `<button class="btn btn-secondary text-xs" data-dismiss-issue><i class="fas fa-eye-slash"></i> Not applicable</button>`}
+        </div>
+      </div>
     </div>
   `
+
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <div class="flex gap-3">
+        <div class="card p-3 text-center" style="min-width:5.5rem"><div class="text-2xl font-bold text-red-600">${bySeverity.error.length}</div><div class="text-xs text-slate-500">Errors</div></div>
+        <div class="card p-3 text-center" style="min-width:5.5rem"><div class="text-2xl font-bold text-amber-600">${bySeverity.warning.length}</div><div class="text-xs text-slate-500">Warnings</div></div>
+        <div class="card p-3 text-center" style="min-width:5.5rem"><div class="text-2xl font-bold text-blue-600">${bySeverity.info.length}</div><div class="text-xs text-slate-500">Info</div></div>
+        ${dismissedIssues.length > 0 ? `<div class="card p-3 text-center" style="min-width:5.5rem"><div class="text-2xl font-bold text-slate-400">${dismissedIssues.length}</div><div class="text-xs text-slate-500">Dismissed</div></div>` : ''}
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary text-xs" id="btn-expand-all"><i class="fas fa-chevron-down"></i> Expand all</button>
+        <button class="btn btn-secondary text-xs" id="btn-collapse-all"><i class="fas fa-chevron-up"></i> Collapse all</button>
+        ${dismissedIssues.length > 0 ? `<button class="btn btn-secondary text-xs" id="btn-toggle-dismissed"><i class="fas fa-eye${complianceUiState.showDismissed ? '-slash' : ''}"></i> ${complianceUiState.showDismissed ? 'Hide' : 'Show'} dismissed (${dismissedIssues.length})</button>` : ''}
+      </div>
+    </div>
+
+    ${activeIssues.length === 0 ? `<div class="card p-8 text-center mb-4"><i class="fas fa-circle-check text-3xl text-emerald-500 mb-2"></i><div class="font-semibold text-emerald-700">All findings dismissed or resolved</div></div>` : ''}
+
+    <div class="space-y-3">
+      ${sectorOrder.map((sector) => {
+        const counts = sectorSummary(sector)
+        const open = complianceUiState.openSectors.has(sector)
+        return `
+        <div class="card overflow-hidden">
+          <button class="w-full flex items-center justify-between px-4 py-2.5 bg-slate-100 text-left" data-sector-toggle="${escapeHtml(sector)}">
+            <span class="font-bold text-teal-900 text-sm"><i class="fas fa-chevron-${open ? 'down' : 'right'} mr-2 text-xs text-slate-400"></i>${escapeHtml(sector)} <span class="text-slate-400 font-normal">(${bySector[sector].length})</span></span>
+            <span class="flex gap-1.5">
+              ${counts.error ? `<span class="badge badge-error">${counts.error} error${counts.error > 1 ? 's' : ''}</span>` : ''}
+              ${counts.warning ? `<span class="badge badge-warning">${counts.warning} warning${counts.warning > 1 ? 's' : ''}</span>` : ''}
+              ${counts.info ? `<span class="badge badge-info">${counts.info} info</span>` : ''}
+            </span>
+          </button>
+          ${open ? `<div class="p-3 space-y-2 bg-white">${bySector[sector]
+            .sort((a, b) => severityWeight[a.severity] - severityWeight[b.severity])
+            .map(issueCard).join('')}</div>` : ''}
+        </div>
+      `}).join('')}
+    </div>
+
+    ${complianceUiState.showDismissed && dismissedIssues.length > 0 ? `
+      <div class="mt-6">
+        <div class="mb-2 text-sm font-semibold text-slate-700"><i class="fas fa-eye-slash mr-1 text-slate-400"></i>Dismissed findings (${dismissedIssues.length})</div>
+        <div class="space-y-2">${dismissedIssues.map(issueCard).join('')}</div>
+      </div>
+    ` : ''}
+  `
+
+  el.querySelectorAll('[data-sector-toggle]').forEach((btn) => btn.addEventListener('click', () => {
+    const sector = btn.dataset.sectorToggle
+    if (complianceUiState.openSectors.has(sector)) complianceUiState.openSectors.delete(sector)
+    else complianceUiState.openSectors.add(sector)
+    renderComplianceTab(el, brief)
+  }))
+  const expandAllBtn = document.getElementById('btn-expand-all')
+  if (expandAllBtn) expandAllBtn.addEventListener('click', () => { for (const s of sectorOrder) complianceUiState.openSectors.add(s); renderComplianceTab(el, brief) })
+  const collapseAllBtn = document.getElementById('btn-collapse-all')
+  if (collapseAllBtn) collapseAllBtn.addEventListener('click', () => { complianceUiState.openSectors.clear(); renderComplianceTab(el, brief) })
+  const toggleDismissedBtn = document.getElementById('btn-toggle-dismissed')
+  if (toggleDismissedBtn) toggleDismissedBtn.addEventListener('click', () => { complianceUiState.showDismissed = !complianceUiState.showDismissed; renderComplianceTab(el, brief) })
+
+  el.querySelectorAll('[data-dismiss-issue]').forEach((btn) => btn.addEventListener('click', async () => {
+    const card = btn.closest('[data-issue-card]')
+    const fingerprint = card.dataset.fingerprint
+    const issue = issues.find((i) => i.fingerprint === fingerprint)
+    if (!issue) return
+    const comment = prompt('Optional note on why this is not applicable (visible to reviewers):', '') || ''
+    await API.postComplianceReview(brief.id, { fingerprint, row_id: issue.row_id, rule_code: issue.rule_code, status: 'dismissed', comment })
+    toast('Marked not applicable')
+    renderComplianceTab(el, brief)
+  }))
+  el.querySelectorAll('[data-reopen-issue]').forEach((btn) => btn.addEventListener('click', async () => {
+    const card = btn.closest('[data-issue-card]')
+    const fingerprint = card.dataset.fingerprint
+    const issue = issues.find((i) => i.fingerprint === fingerprint)
+    if (!issue) return
+    await API.postComplianceReview(brief.id, { fingerprint, row_id: issue.row_id, rule_code: issue.rule_code, status: 'open', comment: '' })
+    toast('Reopened')
+    renderComplianceTab(el, brief)
+  }))
 }
 
 // --- Redundancy tab ----------------------------------------------------------
