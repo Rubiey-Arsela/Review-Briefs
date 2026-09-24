@@ -27,11 +27,19 @@
 //    wrong party's point of view (24 Jul #11/#12, 27-31 Jul A4)
 //  - a much longer list of abbreviations that recurred unexpanded (27-31 Jul
 //    B10, 7 Aug #19/#23/#27, 21 Aug #24/#27, 11 Sep #13)
-// A few style points recur ACROSS editions with contradictory rulings (impact
-// grade format single-word vs multi-word tiers; currency-code spacing; blank
-// Regulatory cell as dash vs boilerplate sentence) — those are intentionally
-// NOT hard-coded here; see README "Known house-style conflicts" for the
-// specific dated citations and the decision this needs from the director.
+// v4: two house-style conflicts flagged in v3 as needing a director decision
+// have now been RESOLVED per the director's explicit 24 Sep 2026 ruling:
+//  (1) Impact grade format — the 4 Sep 2026 change log (item 24) ruling by
+//      Syazwan ("plain single word, no qualifiers") is confirmed as the
+//      standing house style, OVERRIDING the 8-tier system introduced in the
+//      7 Sep 2026 PPTX checklist v2. IMPACT_OPENERS is back to the 4 plain
+//      grades and the opener regex only accepts a single word.
+//  (2) Currency-code spacing — the 11 Sep 2026 change log (item 1) "no space
+//      between currency code and figure" ruling (e.g. "RM170.5 bn", not
+//      "RM 170.5 bn") is confirmed as current house style, reversing all
+//      earlier editions. See checkCurrencySpacing() below.
+// Remaining unresolved conflicts (blank Regulatory cell style; compound grade
+// labels) are unaffected — see README "Known house-style conflicts".
 import type { BriefRow, ComplianceIssue, Entity } from './types'
 import { tokenize, jaccardSimilarity } from './redundancy'
 
@@ -91,10 +99,6 @@ export const IMPACT_OPENERS = [
   'Negative',
   'Neutral',
   'Mixed',
-  'Strategic Benchmark',
-  'Opportunity Watch',
-  'Policy Watch',
-  'High Strategic Relevance',
 ]
 
 // Sector-specific known generic entity phrases that must never appear
@@ -185,8 +189,9 @@ export function checkBannedWords(text: string, source: 'headline' | 'summary' | 
   return issues
 }
 
-// Rule 5/7: Impact cell must open with exactly one grading label (single or
-// multi-word, e.g. "Positive." or "Strategic Benchmark.") followed by a full stop.
+// Rule 5/7: Impact cell must open with exactly one plain single-word grading
+// label (e.g. "Positive.") followed by a full stop — no qualifiers attached
+// to the label (per Syazwan's 4 Sep 2026 ruling, item 24).
 export function checkImpactOpener(impactText: string | null): ComplianceIssue[] {
   const issues: ComplianceIssue[] = []
   if (!impactText || !impactText.trim()) {
@@ -201,8 +206,8 @@ export function checkImpactOpener(impactText: string | null): ComplianceIssue[] 
     return issues
   }
   const trimmed = impactText.trim()
-  // Up to 4 title-case words before the period, e.g. "High Strategic Relevance."
-  const match = trimmed.match(/^([A-Z][a-zA-Z]*(?:\s[A-Z][a-zA-Z]*){0,3})\.\s*/)
+  // Single title-case word before the period only — no qualifiers (4 Sep 2026 ruling).
+  const match = trimmed.match(/^([A-Z][a-zA-Z]*)\.\s*/)
   if (!match) {
     issues.push({
       brief_id: 0,
@@ -603,7 +608,7 @@ const COMPETITIVE_THREAT_PHRASES = [
 export function checkGradePerspective(impactGrade: string | null, impactText: string | null): ComplianceIssue[] {
   const issues: ComplianceIssue[] = []
   if (!impactGrade || !impactText) return issues
-  const positiveTiers = ['Positive', 'Strategic Benchmark', 'Opportunity Watch', 'High Strategic Relevance']
+  const positiveTiers = ['Positive']
   if (!positiveTiers.includes(impactGrade)) return issues
   const lower = impactText.toLowerCase()
   const hasThreat = COMPETITIVE_THREAT_PHRASES.some((p) => lower.includes(p))
@@ -687,6 +692,30 @@ export function checkRegulatoryBoilerplate(regulatoryText: string | null): Compl
   return issues
 }
 
+// Rule (v4, resolved conflict #2): a currency code must have NO space before
+// the figure — "RM170.5 bn", "USD104.35" — per the 11 Sep 2026 change log
+// (item 1), which reverses the "RM 170.5 bn" (with space) style used in all
+// earlier editions. The space before the unit (bn/mn/tn/per barrel etc.) is
+// retained — only the space between the currency code and the number itself
+// is banned.
+export function checkCurrencySpacing(text: string | null, fieldName: string): ComplianceIssue[] {
+  const issues: ComplianceIssue[] = []
+  if (!text) return issues
+  const pattern = /\b(RM|USD)\s+(\d[\d,]*\.?\d*)/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    issues.push({
+      brief_id: 0,
+      row_id: null,
+      rule_code: 'currency_spacing',
+      severity: 'warning',
+      message: `"${match[0]}" has a space between the currency code and the figure — house style (11 Sep 2026 ruling) is no space: "${match[1]}${match[2]}". The space before the unit (bn/mn/tn) is kept.`,
+      excerpt: extractExcerpt(text, match[0]),
+    })
+  }
+  return issues
+}
+
 // Full row check — runs every per-row rule against one brief_row and returns
 // tagged issues. Brief-wide checks (abbreviation first-use) run separately —
 // see checkAbbreviationsAcrossBrief below.
@@ -721,6 +750,12 @@ export function checkRow(row: Partial<BriefRow>, entities: Entity[]): Compliance
   issues.push(...checkEntities(row.impact_text || '', 'impact', entities))
 
   issues.push(...checkSourceAttribution(row))
+
+  // v4 additions (resolved conflict #2)
+  issues.push(...checkCurrencySpacing(row.headline || null, 'headline'))
+  issues.push(...checkCurrencySpacing(row.summary || null, 'summary'))
+  issues.push(...checkCurrencySpacing(row.impact_text || null, 'impact'))
+  issues.push(...checkCurrencySpacing(row.regulatory_text || null, 'regulatory'))
 
   return issues
 }

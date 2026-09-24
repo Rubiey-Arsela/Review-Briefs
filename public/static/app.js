@@ -16,7 +16,7 @@ const SECTORS = [
   'Banking/Financial Services', 'Watchlist', 'Speed Read', 'Other',
 ]
 
-const IMPACT_GRADES = ['Positive', 'Negative', 'Neutral', 'Mixed', 'Strategic Benchmark', 'Opportunity Watch', 'Policy Watch', 'High Strategic Relevance']
+const IMPACT_GRADES = ['Positive', 'Negative', 'Neutral', 'Mixed']
 
 // ---------------------------------------------------------------------------
 // Router
@@ -634,6 +634,7 @@ async function renderComplianceTab(el, brief) {
     entity_named_then_denied: 'Entity named then denied', regulatory_restates_other: 'Regulatory restates other cell',
     regulatory_boilerplate: 'Regulatory cell is a bare dash', unnamed_attribution: 'Unnamed attribution',
     source_in_impact: 'Source attribution in Impact', grade_perspective: 'Grade may be wrong perspective',
+    currency_spacing: 'Currency spacing',
   }
 
   el.innerHTML = `
