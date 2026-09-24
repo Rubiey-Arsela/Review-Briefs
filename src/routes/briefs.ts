@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { AppEnv, Brief, BriefRow, Entity } from '../lib/types'
-import { checkRow, checkAbbreviationsAcrossBrief } from '../lib/compliance'
-import { findRedundancy, toRedundancyMatchRecord } from '../lib/redundancy'
+import { checkRow, checkAbbreviationsAcrossBrief, checkMovementAbbreviations } from '../lib/compliance'
+import { findRedundancy, findIntraBriefRepetition, toRedundancyMatchRecord } from '../lib/redundancy'
 
 const briefs = new Hono<AppEnv>()
 
@@ -290,10 +290,16 @@ briefs.post('/:id/check', async (c) => {
     }
   }
 
-  // Brief-wide check: abbreviations (BESS, DCTF, NIF, NRW, WTP, PUE, TBIP, SAC)
-  // must be expanded on their first use anywhere in the brief.
+  // Brief-wide check: abbreviations (BESS, DCTF, NIF, NRW, WTP, PUE, TBIP, SAC,
+  // plus the v3 long tail) must be expanded on their first use anywhere in the brief.
   const abbrevFlags = checkAbbreviationsAcrossBrief(rows)
   for (const { row_id, issue } of abbrevFlags) {
+    allIssues.push({ row_id, rule_code: issue.rule_code, severity: issue.severity, message: issue.message, excerpt: issue.excerpt })
+  }
+
+  // Brief-wide check (v3): mom/yoy/wow/qoq movement abbreviations never expanded anywhere.
+  const movementFlags = checkMovementAbbreviations(rows)
+  for (const { row_id, issue } of movementFlags) {
     allIssues.push({ row_id, rule_code: issue.rule_code, severity: issue.severity, message: issue.message, excerpt: issue.excerpt })
   }
 
@@ -326,15 +332,30 @@ briefs.post('/:id/check', async (c) => {
 
     const candidates = findRedundancy(rows, priorRows)
     for (const candidate of candidates) {
-      const record = toRedundancyMatchRecord(id, candidate)
+      const record = toRedundancyMatchRecord(id, candidate, 'cross_week')
       await c.env.DB.prepare(
-        `INSERT INTO redundancy_matches (brief_id, row_id, prior_brief_id, prior_row_id, similarity_score, match_type, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO redundancy_matches (brief_id, row_id, prior_brief_id, prior_row_id, similarity_score, match_type, note, scope)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-        .bind(record.brief_id, record.row_id, record.prior_brief_id, record.prior_row_id, record.similarity_score, record.match_type, record.note)
+        .bind(record.brief_id, record.row_id, record.prior_brief_id, record.prior_row_id, record.similarity_score, record.match_type, record.note, record.scope)
         .run()
       redundancyCount++
     }
+  }
+
+  // --- v3: intra-brief repetition — this SAME edition repeating itself ---
+  // (Sec 2 restating Sec 1/3, Speed Read restating the Executive Summary, two
+  // rows sharing one channel sentence — see findIntraBriefRepetition doc comment)
+  const intraCandidates = findIntraBriefRepetition(rows)
+  for (const candidate of intraCandidates) {
+    const record = toRedundancyMatchRecord(id, candidate, 'intra_brief')
+    await c.env.DB.prepare(
+      `INSERT INTO redundancy_matches (brief_id, row_id, prior_brief_id, prior_row_id, similarity_score, match_type, note, scope)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(record.brief_id, record.row_id, id, record.prior_row_id, record.similarity_score, record.match_type, record.note, record.scope)
+      .run()
+    redundancyCount++
   }
 
   await c.env.DB.prepare(`UPDATE briefs SET status = 'checked', updated_at = datetime('now') WHERE id = ?`).bind(id).run()
@@ -377,7 +398,7 @@ briefs.get('/:id/redundancy', async (c) => {
      JOIN brief_rows pr ON pr.id = rm.prior_row_id
      JOIN briefs pb ON pb.id = rm.prior_brief_id
      WHERE rm.brief_id = ?
-     ORDER BY rm.similarity_score DESC`
+     ORDER BY rm.scope ASC, rm.similarity_score DESC`
   )
     .bind(id)
     .all()

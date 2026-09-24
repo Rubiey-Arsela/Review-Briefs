@@ -10,7 +10,7 @@ const STOPWORDS = new Set([
   'after', 'over', 'into', 'amid', 'malaysia', 'malaysian',
 ])
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9%.\s]/g, ' ')
@@ -20,7 +20,7 @@ function tokenize(text: string): string[] {
 
 // Jaccard similarity over token sets — cheap, deterministic, good enough for
 // "is this the same story" detection without external ML calls.
-function jaccardSimilarity(a: string[], b: string[]): number {
+export function jaccardSimilarity(a: string[], b: string[]): number {
   const setA = new Set(a)
   const setB = new Set(b)
   if (setA.size === 0 || setB.size === 0) return 0
@@ -110,8 +110,9 @@ function safeParseEntities(json: string | null): string[] {
 
 export function toRedundancyMatchRecord(
   briefId: number,
-  candidate: RedundancyCandidate
-): Omit<RedundancyMatch, 'id'> {
+  candidate: RedundancyCandidate,
+  scope: 'cross_week' | 'intra_brief' = 'cross_week'
+): Omit<RedundancyMatch, 'id'> & { scope: 'cross_week' | 'intra_brief' } {
   return {
     brief_id: briefId,
     row_id: candidate.row.id,
@@ -120,5 +121,52 @@ export function toRedundancyMatchRecord(
     similarity_score: candidate.similarity,
     match_type: candidate.matchType,
     note: candidate.note,
+    scope,
   }
+}
+
+// ----------------------------------------------------------------------------
+// v3: intra-brief repetition — the SAME edition repeating itself. This is a
+// distinct, genuinely new failure mode from cross-week redundancy above, and
+// recurred across at least 5 historical editions:
+//  - Sec 2 "Structural Macroeconomic Positioning" restating Sec 1/Sec 3 rows
+//    almost verbatim (31 Jul #3, 7 Aug #10, 21 Aug #11 — "last week one
+//    paragraph was duplicated; this week it is three")
+//  - Speed Read bullets restating Executive Summary paragraphs sentence-for-
+//    sentence (4 Sep #10: "Bullets 1,3,4,5,7,8,9,10 restate Executive Summary
+//    paragraphs 1 to 3"; 21 Aug #10: "Seven of nine Speed Read bullets repeat
+//    para 3 sentences almost verbatim")
+//  - two rows in the SAME brief (often both in the Pulse table, or two
+//    sector rows) ending on the identical channel/sentence (7 Aug #12; 21 Aug
+//    #14 "All three cells end on the same channel")
+// Threshold is slightly higher than cross-week (0.5) because within a single
+// edition some shared vocabulary between adjacent sector rows is expected and
+// only near-verbatim repetition is worth flagging.
+export function findIntraBriefRepetition(rows: BriefRow[]): RedundancyCandidate[] {
+  const candidates: RedundancyCandidate[] = []
+  const tokenized = rows.map((r) => ({
+    row: r,
+    tokens: tokenize(`${r.headline} ${r.summary || ''} ${r.impact_text || ''}`),
+  }))
+
+  for (let i = 0; i < tokenized.length; i++) {
+    for (let j = i + 1; j < tokenized.length; j++) {
+      const a = tokenized[i]
+      const b = tokenized[j]
+      if (a.tokens.length < 5 || b.tokens.length < 5) continue // too short to compare meaningfully
+      const sim = jaccardSimilarity(a.tokens, b.tokens)
+      if (sim < 0.5) continue
+
+      candidates.push({
+        row: a.row,
+        priorRow: b.row,
+        similarity: sim,
+        matchType: sim >= 0.65 ? 'likely_duplicate' : 'continuing_story',
+        note: `Near-identical text (${Math.round(sim * 100)}% overlap) with another row in THIS SAME edition ("${b.row.headline.slice(0, 60)}…", ${b.row.sector}). Recurring fault: Sec 2 restating Sec 1/3, Speed Read restating the Executive Summary, or two rows sharing one channel sentence — flagged in the 31 Jul, 7 Aug and 21 Aug editions.`,
+      })
+    }
+  }
+
+  candidates.sort((a, b) => b.similarity - a.similarity)
+  return candidates
 }

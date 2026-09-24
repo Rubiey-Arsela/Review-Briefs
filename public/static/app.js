@@ -631,6 +631,9 @@ async function renderComplianceTab(el, brief) {
     entity_generic: 'Generic Group reference', entity_alias: 'Entity name/ownership', no_source: 'Missing source', weak_language: 'Certainty language',
     transmission_mechanism: 'Missing transmission mechanism', entity_missing_in_impact: 'No named business in Impact',
     headline_summary_mismatch: 'Headline/Summary mismatch', abbreviation_expansion: 'Abbreviation not expanded',
+    entity_named_then_denied: 'Entity named then denied', regulatory_restates_other: 'Regulatory restates other cell',
+    regulatory_boilerplate: 'Regulatory cell is a bare dash', unnamed_attribution: 'Unnamed attribution',
+    source_in_impact: 'Source attribution in Impact', grade_perspective: 'Grade may be wrong perspective',
   }
 
   el.innerHTML = `
@@ -672,29 +675,41 @@ async function renderRedundancyTab(el, brief) {
   const typeLabel = { likely_duplicate: 'Likely duplicate', continuing_story: 'Continuing story', similar_topic: 'Similar topic' }
   const typeBadge = { likely_duplicate: 'badge-error', continuing_story: 'badge-warning', similar_topic: 'badge-neutral' }
 
-  el.innerHTML = `
-    <p class="text-sm text-slate-500 mb-3"><i class="fas fa-circle-info mr-1"></i>Compared against prior briefs by headline/summary text overlap. "Likely duplicate" = same story restated; "Continuing story" is acceptable only if the angle/figures genuinely moved this week.</p>
-    <div class="space-y-3">
-      ${matches.map((m) => `
+  const intraMatches = matches.filter((m) => m.scope === 'intra_brief')
+  const crossMatches = matches.filter((m) => m.scope !== 'intra_brief')
+
+  const renderMatch = (m, sameEdition) => `
         <div class="card p-4">
           <div class="flex items-center justify-between mb-2">
             <span class="badge ${typeBadge[m.match_type]}">${typeLabel[m.match_type]} · ${Math.round(m.similarity_score * 100)}% overlap</span>
-            <span class="text-xs text-slate-400">vs ${escapeHtml(m.prior_week_label)} (${escapeHtml(m.prior_period_start)})</span>
+            <span class="text-xs text-slate-400">${sameEdition ? 'within this same edition' : `vs ${escapeHtml(m.prior_week_label)} (${escapeHtml(m.prior_period_start)})`}</span>
           </div>
           <div class="grid sm:grid-cols-2 gap-3">
             <div class="border border-slate-200 rounded p-2">
-              <div class="text-xs text-slate-400 mb-1">This week — ${escapeHtml(m.row_sector)}</div>
+              <div class="text-xs text-slate-400 mb-1">${sameEdition ? 'Row A' : 'This week'} — ${escapeHtml(m.row_sector)}</div>
               <div class="text-sm font-semibold text-slate-800">${escapeHtml(m.row_headline)}</div>
             </div>
             <div class="border border-slate-200 rounded p-2 bg-slate-50">
-              <div class="text-xs text-slate-400 mb-1">Prior — ${escapeHtml(m.prior_sector)}</div>
+              <div class="text-xs text-slate-400 mb-1">${sameEdition ? 'Row B' : 'Prior'} — ${escapeHtml(m.prior_sector)}</div>
               <div class="text-sm font-semibold text-slate-600">${escapeHtml(m.prior_headline)}</div>
             </div>
           </div>
           <div class="text-xs text-slate-500 mt-2">${escapeHtml(m.note)}</div>
         </div>
-      `).join('')}
-    </div>
+  `
+
+  el.innerHTML = `
+    ${intraMatches.length > 0 ? `
+      <div class="mb-2 text-sm font-semibold text-slate-700"><i class="fas fa-copy mr-1 text-amber-500"></i>Repeats within this same edition (${intraMatches.length})</div>
+      <p class="text-xs text-slate-500 mb-3">Sec 2 restating Sec 1/3, Speed Read restating the Executive Summary, or two rows ending on the same channel sentence — this exact fault recurred in the 31 Jul, 7 Aug and 21 Aug editions.</p>
+      <div class="space-y-3 mb-6">${intraMatches.map((m) => renderMatch(m, true)).join('')}</div>
+    ` : ''}
+    <div class="mb-2 text-sm font-semibold text-slate-700"><i class="fas fa-clock-rotate-left mr-1 text-slate-400"></i>Repeats vs prior weeks (${crossMatches.length})</div>
+    <p class="text-sm text-slate-500 mb-3"><i class="fas fa-circle-info mr-1"></i>Compared against prior briefs by headline/summary text overlap. "Likely duplicate" = same story restated; "Continuing story" is acceptable only if the angle/figures genuinely moved this week.</p>
+    ${crossMatches.length === 0 ? `<div class="card p-6 text-center text-sm text-slate-500">No repeats found against prior weeks.</div>` : `
+    <div class="space-y-3">
+      ${crossMatches.map((m) => renderMatch(m, false)).join('')}
+    </div>`}
   `
 }
 

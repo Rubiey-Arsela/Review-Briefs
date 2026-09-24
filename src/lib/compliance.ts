@@ -10,7 +10,30 @@
 // the full ownership map, not just a generic-phrase ban; (4) abbreviations
 // (BESS, DCTF, NIF, NRW, WTP, PUE, TBIP, SAC) must be expanded on first use
 // across the whole brief.
+//
+// v3: mined from 10 real director/manager change-log editions of the actual
+// weekly brief (24 Jul 2026 - 11 Sep 2026), per instruction: "make sure review
+// and don't repeat same mistakes every week." New rule families added below,
+// each annotated with which edition(s) it recurred in:
+//  - "relevant to X" bolted-on connector phrase (31 Jul, 7 Aug, 21 Aug, 4 Sep)
+//  - naming an entity then denying a Group channel in the same cell (7 Aug #1)
+//  - Regulatory column restating Summary/Impact almost verbatim (24 Jul #20,
+//    31 Jul C9, 4 Sep #35/48)
+//  - generic/unnamed attribution — "analysts expect", "industry leaders urged"
+//    with no named research house or forum (6 Aug B8, 7 Aug #26, 11 Sep #24)
+//  - source attribution leaking into the Impact cell instead of the Summary
+//    (7 Aug #16)
+//  - Impact grade contradicted by the cell's own sentiment / graded from the
+//    wrong party's point of view (24 Jul #11/#12, 27-31 Jul A4)
+//  - a much longer list of abbreviations that recurred unexpanded (27-31 Jul
+//    B10, 7 Aug #19/#23/#27, 21 Aug #24/#27, 11 Sep #13)
+// A few style points recur ACROSS editions with contradictory rulings (impact
+// grade format single-word vs multi-word tiers; currency-code spacing; blank
+// Regulatory cell as dash vs boilerplate sentence) — those are intentionally
+// NOT hard-coded here; see README "Known house-style conflicts" for the
+// specific dated citations and the decision this needs from the director.
 import type { BriefRow, ComplianceIssue, Entity } from './types'
+import { tokenize, jaccardSimilarity } from './redundancy'
 
 // --- Rule 16/17: banned / weak vocabulary -----------------------------------
 // Never strengthen language beyond the source; avoid filler, hedging and padding.
@@ -38,6 +61,14 @@ export const BANNED_WORDS: { word: string; note: string }[] = [
   { word: 'improving competitiveness', note: 'Generic padding unless it adds new information.' },
   { word: 'improves competitiveness', note: 'Generic padding unless it adds new information.' },
   { word: 'intraday', note: 'Do not reference intraday prices/time-of-day — use settlement or official close basis only.' },
+  // --- v3 additions, mined from historical change logs ------------------
+  { word: 'relevant to', note: 'Banned bolted-on connector (recurred across the 31 Jul, 7 Aug, 21 Aug and 4 Sep editions despite repeated correction). Replace with the actual transmission channel, or drop the link entirely if there is no real one.' },
+  { word: 'with implications for', note: 'Banned vague closer — always state the direction (positive/negative) and the mechanism, not just that "implications" exist.' },
+  { word: 'despite external uncertainties', note: 'Banned trailing filler — cut; it adds no information (flagged 31 Jul C13).' },
+  { word: 'highlighting supply chain risks', note: 'Banned trailing filler/padding — cut unless a specific new risk is named (flagged 31 Jul C13).' },
+  { word: 'reinforcing', note: 'Banned generic verb — same family as reinforce/reinforces.' },
+  { word: 'validate', note: 'Banned generic verb (validates/validating) — say specifically what changed, not that something abstract was "validated".' },
+  { word: 'validates', note: 'Banned generic verb.' },
 ]
 
 // --- Rule 11/19: preserve source certainty ----------------------------------
@@ -70,6 +101,12 @@ export const IMPACT_OPENERS = [
 const GENERIC_ENTITY_PHRASES = ['across the group', 'group companies', 'the group']
 
 // --- Rule 20: abbreviations that must be expanded on first use --------------
+// Base set from the Sept 2026 PPTX checklist v2, plus a long tail mined from
+// the 10 historical change logs — every one of these was flagged UNEXPANDED
+// in at least one real edition (citations in the comment column). Lower-case
+// 3-4 letter movement abbreviations (mom/yoy/wow/qoq) are handled separately
+// by checkMovementAbbreviations() below since they are case-insensitive and
+// far more frequent than a per-brief "first use" tracker suits.
 export const REQUIRED_ABBREVIATIONS: { abbr: string; full: string }[] = [
   { abbr: 'BESS', full: 'Battery Energy Storage Systems' },
   { abbr: 'DCTF', full: 'Data Centre Task Force' },
@@ -79,6 +116,42 @@ export const REQUIRED_ABBREVIATIONS: { abbr: string; full: string }[] = [
   { abbr: 'PUE', full: 'Power Usage Effectiveness' },
   { abbr: 'TBIP', full: 'Tanjung Bin Industrial Park' },
   { abbr: 'SAC', full: 'Senai Airport City' },
+  // v3 additions — each flagged unexpanded in a real edition:
+  { abbr: 'TIV', full: 'total industry volume' },               // 27-31 Jul B10, 21 Aug #24
+  { abbr: 'xEV', full: 'electrified vehicle' },                 // 27-31 Jul B10
+  { abbr: 'TNB', full: 'Tenaga Nasional Berhad' },               // 27-31 Jul B10
+  { abbr: 'MITI', full: 'Ministry of Investment, Trade and Industry' }, // 27-31 Jul B10
+  { abbr: 'AMRO', full: 'ASEAN+3 Macroeconomic Research Office' }, // 27-31 Jul B10
+  { abbr: 'GM32', full: 'Gas Malaysia\u2019s GM32 Transformation Programme' }, // 21 Aug #24
+  { abbr: 'PETRA', full: 'Ministry of Natural Resources and Environmental Sustainability' }, // 7 Aug #27
+  { abbr: 'AIRB', full: 'Aliran Ihsan Resources Berhad' },       // 7 Aug #27
+  { abbr: 'MNRB', full: 'MNRB Holdings Berhad' },                // 7 Aug #27
+  { abbr: 'CAAM', full: 'Civil Aviation Authority of Malaysia' }, // 7 Aug #23/#27
+  { abbr: 'PDRM', full: 'Royal Malaysia Police' },               // 7 Aug #23/#27
+  { abbr: 'AVSEC', full: 'aviation security' },                  // 7 Aug #27
+  { abbr: 'MEP', full: 'mechanical, electrical and plumbing' },  // 7 Aug #27, 4 Sep #64
+  { abbr: 'FMM', full: 'Federation of Malaysian Manufacturers' }, // 4 Sep #14
+  { abbr: 'GDV', full: 'Gross Development Value' },              // 21 Aug #26
+  { abbr: 'NAFAS', full: 'National Farmers\u2019 Organisation' }, // 4 Sep #60
+  { abbr: 'MIDA', full: 'Malaysian Investment Development Authority' }, // 11 Sep #13
+  { abbr: 'MPOB', full: 'Malaysian Palm Oil Board' },            // 11 Sep #13
+  { abbr: 'BNM', full: 'Bank Negara Malaysia' },                 // 11 Sep #13
+  { abbr: 'SOFR', full: 'Secured Overnight Financing Rate' },    // 11 Sep #13
+  { abbr: 'TEU', full: 'twenty-foot equivalent unit' },          // 11 Sep #13, #25
+  { abbr: 'LNG', full: 'liquefied natural gas' },                // 11 Sep #12
+  { abbr: 'E&E', full: 'electrical and electronics' },           // 21 Aug #22
+  { abbr: 'AI', full: 'artificial intelligence' },                // 11 Sep #13
+]
+
+// Rule: movement/period-on-period abbreviations must be expanded on first use.
+// Case-insensitive and checked once per brief regardless of column, since these
+// appear dozens of times per edition (mom/yoy/wow/qoq) — flagged unexpanded in
+// the 6 Aug (#13) and 21 Aug (#24) editions.
+const MOVEMENT_ABBREVIATIONS: { abbr: string; full: string }[] = [
+  { abbr: 'yoy', full: 'year-on-year' },
+  { abbr: 'mom', full: 'month-on-month' },
+  { abbr: 'wow', full: 'week-on-week' },
+  { abbr: 'qoq', full: 'quarter-on-quarter' },
 ]
 
 // --- Rule 4/9: transmission-mechanism connectors -----------------------------
@@ -378,6 +451,242 @@ export function checkHeadlineSummaryAlignment(headline: string | null, summary: 
   return issues
 }
 
+// ============================================================================
+// v3 rules — mined from 10 historical director/manager change-log editions.
+// ============================================================================
+
+// Rule (v3): an Impact cell must not name a specific Al Bukhary business and
+// then, in the same breath, deny any Group link to it. This exact mistake was
+// called out by name in the 7 Aug edition (#1): "...relevant to Malakoff, but
+// there is no direct Group channel at present." — the cell contradicts itself.
+const DENIAL_PHRASES = [
+  'no direct group channel', 'no group channel', 'not disclosed in the syndicate',
+  'no disclosed direct', 'no direct al bukhary exposure', 'no group exposure',
+  'no group company is currently named', 'no group participation',
+]
+export function checkEntityThenDenial(impactText: string | null, entities: Entity[]): ComplianceIssue[] {
+  const issues: ComplianceIssue[] = []
+  if (!impactText || !impactText.trim()) return issues
+  const lower = impactText.toLowerCase()
+  const hasDenial = DENIAL_PHRASES.some((p) => lower.includes(p))
+  if (!hasDenial) return issues
+
+  const names: string[] = []
+  for (const e of entities) {
+    names.push(e.name)
+    if (e.aliases) {
+      try { names.push(...(JSON.parse(e.aliases) as string[])) } catch { /* ignore */ }
+    }
+  }
+  const namedEntity = names.find((n) => n && new RegExp(`\\b${escapeRegex(n)}\\b`, 'i').test(impactText))
+  if (namedEntity) {
+    issues.push({
+      brief_id: 0,
+      row_id: null,
+      rule_code: 'entity_named_then_denied',
+      severity: 'error',
+      message: `Impact names "${namedEntity}" but then denies a Group channel in the same cell — this exact contradiction was flagged in the 7 Aug 2026 edition. Either keep the read-across and delete the disclaimer, or delete the entity name and grade on sector news alone.`,
+      excerpt: extractExcerpt(impactText, namedEntity),
+    })
+  }
+  return issues
+}
+
+// Rule (v3): the Regulatory/Policy cell must add NEW information — the actual
+// regulatory mechanism or a policy change — not restate what the Summary or
+// Impact cell already said, and not carry a "monitoring note" that is not
+// itself a policy change. Flagged repeatedly: 24 Jul #20, 31 Jul C9, 7 Aug #1,
+// 4 Sep #35/#48.
+const REGULATORY_RESTATEMENT_PHRASES = [
+  'not a policy decision', 'not a confirmed decision', 'no scope, investment or timetable',
+  'no measures are in force', 'remains a market expectation',
+]
+export function checkRegulatoryRestatesOther(regulatoryText: string | null, summaryText: string | null, impactText: string | null): ComplianceIssue[] {
+  const issues: ComplianceIssue[] = []
+  if (!regulatoryText || !regulatoryText.trim() || regulatoryText.trim() === '-' || regulatoryText.trim() === '\u2013') return issues
+  const regTokens = tokenize(regulatoryText)
+  if (regTokens.length >= 5) {
+    for (const [label, other] of [['summary', summaryText], ['impact', impactText]] as const) {
+      if (!other) continue
+      const sim = jaccardSimilarity(regTokens, tokenize(other))
+      if (sim >= 0.5) {
+        issues.push({
+          brief_id: 0,
+          row_id: null,
+          rule_code: 'regulatory_restates_other',
+          severity: 'warning',
+          message: `Regulatory cell largely restates the ${label} cell (${Math.round(sim * 100)}% word overlap) instead of stating the actual regulatory mechanism or policy change. Fill with the real mechanism or dash the cell — this was flagged in the 24 Jul, 31 Jul and 4 Sep editions.`,
+          excerpt: regulatoryText.slice(0, 80),
+        })
+      }
+    }
+  }
+  const lower = regulatoryText.toLowerCase()
+  for (const phrase of REGULATORY_RESTATEMENT_PHRASES) {
+    if (lower.includes(phrase)) {
+      issues.push({
+        brief_id: 0,
+        row_id: null,
+        rule_code: 'regulatory_restates_other',
+        severity: 'info',
+        message: `Regulatory cell carries a monitoring/disclaimer note ("${phrase}") rather than an actual policy change — confirm this is deliberate.`,
+        excerpt: extractExcerpt(regulatoryText, phrase),
+      })
+    }
+  }
+  return issues
+}
+
+// Rule (v3): claims of the form "analysts expect...", "research houses cited
+// expect...", "industry leaders urged..." must name the specific research
+// house / forum / speaker. Flagged in 6 Aug (B8) and 7 Aug (#26 — Speed Read
+// dropped Phillip Capital's attribution) and echoed in 11 Sep (#24).
+const UNNAMED_ATTRIBUTION_PHRASES = [
+  'analysts expect', 'analysts said', 'industry leaders urged', 'research houses expect',
+  'sources said', 'experts say', 'experts believe', 'market watchers',
+]
+export function checkUnnamedAttribution(text: string | null, fieldName: string): ComplianceIssue[] {
+  const issues: ComplianceIssue[] = []
+  if (!text) return issues
+  const lower = text.toLowerCase()
+  for (const phrase of UNNAMED_ATTRIBUTION_PHRASES) {
+    if (lower.includes(phrase)) {
+      issues.push({
+        brief_id: 0,
+        row_id: null,
+        rule_code: 'unnamed_attribution',
+        severity: 'warning',
+        message: `"${phrase}" in ${fieldName} has no named source — name the specific research house, analyst, forum or speaker (e.g. "RHB Research", "Phillip Capital"). Recurred in the 6 Aug and 7 Aug editions.`,
+        excerpt: extractExcerpt(text, phrase),
+      })
+    }
+  }
+  return issues
+}
+
+// Rule (v3): a wire-service attribution phrase ("according to sources",
+// "Reuters noted that...") belongs in the Summary, not the Impact cell — the
+// Impact column is the Group's own read, not a restatement of the wire's
+// hedge. Flagged 7 Aug (#16) and 4 Sep (#66).
+const WIRE_ATTRIBUTION_IN_IMPACT = ['according to sources', 'reuters noted', 'sources said', 'the wire reported']
+export function checkSourceLeaksIntoImpact(impactText: string | null): ComplianceIssue[] {
+  const issues: ComplianceIssue[] = []
+  if (!impactText) return issues
+  const lower = impactText.toLowerCase()
+  for (const phrase of WIRE_ATTRIBUTION_IN_IMPACT) {
+    if (lower.includes(phrase)) {
+      issues.push({
+        brief_id: 0,
+        row_id: null,
+        rule_code: 'source_in_impact',
+        severity: 'warning',
+        message: `Wire-attribution phrase "${phrase}" found in Impact — move it to the Summary. The Impact column is the Group's own read, not the wire's hedge (flagged 7 Aug #16, 4 Sep #66).`,
+        excerpt: extractExcerpt(impactText, phrase),
+      })
+    }
+  }
+  return issues
+}
+
+// Rule (v3): a row's Impact grade must be consistent with which side of the
+// transaction/story the Al Bukhary business sits on. Classic failure mode
+// (24 Jul #11/#12): a competitor's strengthening move is graded Positive
+// because the sentence is upbeat in isolation, when in fact it describes a
+// competitive THREAT to the Group and should be Negative/Neutral. Heuristic:
+// if the Impact opens Positive/Strategic-tier but the same cell also contains
+// a competitive-threat phrase naming a competitor gaining ground, flag for
+// human check — this cannot be fully automated, so it is an info-level nudge.
+const COMPETITIVE_THREAT_PHRASES = [
+  'intensifying competition', 'competing for', 'competitor', 'competing against',
+  'outperform the broader market', 'strengthens its position against',
+]
+export function checkGradePerspective(impactGrade: string | null, impactText: string | null): ComplianceIssue[] {
+  const issues: ComplianceIssue[] = []
+  if (!impactGrade || !impactText) return issues
+  const positiveTiers = ['Positive', 'Strategic Benchmark', 'Opportunity Watch', 'High Strategic Relevance']
+  if (!positiveTiers.includes(impactGrade)) return issues
+  const lower = impactText.toLowerCase()
+  const hasThreat = COMPETITIVE_THREAT_PHRASES.some((p) => lower.includes(p))
+  if (hasThreat) {
+    issues.push({
+      brief_id: 0,
+      row_id: null,
+      rule_code: 'grade_perspective',
+      severity: 'info',
+      message: `Impact is graded "${impactGrade}" but the text describes a competitor gaining ground — confirm the grade is read from the Al Bukhary Group's position, not the subject company's. This exact fault (grading from the wrong party's chair) was flagged twice in the 24 Jul edition (#11, #12).`,
+      excerpt: impactText.slice(0, 80),
+    })
+  }
+  return issues
+}
+
+// Rule (v3): flag stated figure movements where two different comparison
+// bases might be mixed (e.g. a single month vs a full year, or a forecast vs
+// an actual) — heuristic companion to checkXFromY. Historical instances: 24
+// Jul #40 (single-month FX average vs full-year average), 6 Aug (missing
+// no-repetition baseline). This heuristic looks for a figure followed by
+// "as of <month>" or a specific month name near another figure qualified
+// "in <year>" without a matching month — genuinely hard to detect reliably,
+// so kept as info-level only.
+export function checkMovementAbbreviations(rows: BriefRow[]): { row_id: number; issue: ComplianceIssue }[] {
+  const flagged: { row_id: number; issue: ComplianceIssue }[] = []
+  const expandedAnywhere = new Set<string>()
+  const sorted = [...rows].sort((a, b) => (a.row_order ?? 0) - (b.row_order ?? 0))
+
+  // First pass: does the brief expand any of these anywhere at all?
+  for (const row of sorted) {
+    const fullText = [row.headline, row.summary, row.impact_text, row.regulatory_text].filter(Boolean).join(' \n ')
+    for (const { abbr, full } of MOVEMENT_ABBREVIATIONS) {
+      if (new RegExp(full.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&'), 'i').test(fullText)) {
+        expandedAnywhere.add(abbr)
+      }
+    }
+  }
+
+  for (const { abbr, full } of MOVEMENT_ABBREVIATIONS) {
+    if (expandedAnywhere.has(abbr)) continue
+    // Find the first row that uses it, to attach the flag somewhere useful.
+    for (const row of sorted) {
+      const fullText = [row.headline, row.summary, row.impact_text, row.regulatory_text].filter(Boolean).join(' \n ')
+      if (new RegExp(`\\b${abbr}\\b`, 'i').test(fullText)) {
+        flagged.push({
+          row_id: row.id,
+          issue: {
+            brief_id: 0,
+            row_id: row.id,
+            rule_code: 'abbreviation_expansion',
+            severity: 'info',
+            message: `"${abbr}" is used throughout the brief but never expanded once — add a first-use gloss, e.g. "${full} (${abbr})" (flagged in the 6 Aug and 21 Aug editions).`,
+            excerpt: extractExcerpt(fullText, abbr),
+          },
+        })
+        break
+      }
+    }
+  }
+  return flagged
+}
+
+// Rule (v3): the Regulatory/Policy cell should never be a bare dash/blank —
+// house style (per the 6 Aug review, item 3) is the standard boilerplate
+// sentence. Checked separately from checkRegulatoryRestatesOther because an
+// EMPTY cell and a cell that MERELY RESTATES are different failure modes.
+export function checkRegulatoryBoilerplate(regulatoryText: string | null): ComplianceIssue[] {
+  const issues: ComplianceIssue[] = []
+  const trimmed = (regulatoryText || '').trim()
+  if (trimmed === '' || trimmed === '-' || trimmed === '\u2013' || trimmed === '\u2014') {
+    issues.push({
+      brief_id: 0,
+      row_id: null,
+      rule_code: 'regulatory_boilerplate',
+      severity: 'info',
+      message: 'Regulatory/Policy cell is a bare dash — house style (6 Aug review, item 3) is the standard sentence "No new regulatory or policy changes were introduced." rather than a dash.',
+      excerpt: null,
+    })
+  }
+  return issues
+}
+
 // Full row check — runs every per-row rule against one brief_row and returns
 // tagged issues. Brief-wide checks (abbreviation first-use) run separately —
 // see checkAbbreviationsAcrossBrief below.
@@ -397,6 +706,15 @@ export function checkRow(row: Partial<BriefRow>, entities: Entity[]): Compliance
 
   issues.push(...checkCertaintyOverreach(row.summary || null, 'summary'))
   issues.push(...checkHeadlineSummaryAlignment(row.headline || null, row.summary || null))
+
+  // v3 additions
+  issues.push(...checkEntityThenDenial(row.impact_text || null, entities))
+  issues.push(...checkRegulatoryRestatesOther(row.regulatory_text || null, row.summary || null, row.impact_text || null))
+  issues.push(...checkRegulatoryBoilerplate(row.regulatory_text || null))
+  issues.push(...checkUnnamedAttribution(row.summary || null, 'summary'))
+  issues.push(...checkUnnamedAttribution(row.impact_text || null, 'impact'))
+  issues.push(...checkSourceLeaksIntoImpact(row.impact_text || null))
+  issues.push(...checkGradePerspective(row.impact_grade || null, row.impact_text || null))
 
   issues.push(...checkEntities(row.headline || '', 'headline', entities))
   issues.push(...checkEntities(row.summary || '', 'summary', entities))

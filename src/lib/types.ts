@@ -86,6 +86,7 @@ export interface RedundancyMatch {
   similarity_score: number
   match_type: 'likely_duplicate' | 'continuing_story' | 'similar_topic'
   note: string | null
+  scope: 'cross_week' | 'intra_brief'
 }
 
 export const SECTORS = [
