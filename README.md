@@ -30,9 +30,8 @@
   - Plus an **Al Bukhary Entity Map** admin view (subsidiaries vs associates, ownership %, aliases) used by the compliance engine.
 
 ## URLs
-- **Local dev preview**: https://3000-i77uenqd0jq85mc5rvhj8-2e77fc33.sandbox.novita.ai (sandbox dev server — not yet deployed to production)
+- **Production**: https://maida-vale-qa.pages.dev
 - **Live Brief Site (companion, separate app)**: https://maida-vale-weekly-brief.pages.dev
-- **Production**: not yet deployed — pending Cloudflare API token + decision on deploy target (own project vs. same project as the live brief site)
 
 ## Data Architecture
 - **Storage**: Cloudflare D1 (SQLite) for all structured data; Cloudflare R2 for original uploaded .docx/.pdf files.
@@ -62,11 +61,7 @@ Mining all 10 historical change logs surfaced a small number of points where **d
 Items 3 and 4 remain deliberate omissions pending further director confirmation, per the "don't repeat the same mistakes" instruction not extending to "guess when the house itself disagreed with itself."
 
 ## Deployment
-- **Platform**: Cloudflare Pages (Hono + D1 + R2)
-- **Status**: ❌ Not yet deployed to production — currently local-dev only (PM2 + `wrangler pages dev --local`)
+- **Platform**: Cloudflare Pages (Hono + D1 + R2), BYOK deploy — live at https://maida-vale-qa.pages.dev
+- **Status**: ✅ Live in production
 - **Tech Stack**: Hono + TypeScript + Vite, D1 (SQLite), R2, vanilla-JS SPA frontend (Tailwind CDN), mammoth.js + pdf.js for client-side document parsing
-- **Outstanding before production deploy**:
-  - Create real D1 database (`wrangler d1 create maida-vale-qa-production`) and R2 bucket, replace the placeholder `database_id` in `wrangler.jsonc`
-  - Requires a Cloudflare API token (not yet supplied) — use the `cf-byok-deploy` or `gsk-hosted-deploy` skill when ready
-  - Confirm with user: deploy as its own Pages project, or alongside the existing `maida-vale-weekly-brief` site
-- **Last Updated**: 2026-09-24 (v4: resolved 2 house-style conflicts per director decision — reverted to 4-grade Impact system, added currency-code no-space rule; fixed the auto-sweep's dead Bernama/NST RSS URLs across all 3 places they were hardcoded, then expanded coverage from 3 to 6 working outlets — Bernama, Malay Mail, The Guardian, Malaysiakini, The Vibes, The Sun — via a GenTeam Deep Research audit whose "confirmed working" candidates were independently re-verified, rejecting 4 false positives: FMT, The Malaysian Insight, Borneo Post, CodeBlue)
+- **Last Updated**: 2026-09-24 — Compliance tab simplified: findings are now grouped by sector into collapsible sections (each with its own error/warning/info sub-counts) instead of one long flat list, and the previously-invisible reviewer dismiss/comment system (`compliance_reviews` table, existed server-side since v5) now has a frontend — a finding marked "Not applicable" is hidden from the active view and stays hidden across every future Run Check (matched by content fingerprint), instead of resurfacing every re-check looking like a fresh/wrong flag. Also: added the first Deep Fact-Check report (Brief #11, 40 claims cross-checked against Reuters/BNM/Fed/BOJ/MATRADE/DOSM/company-official sources — 37 confirmed, 3 flagged with minor caveats, verdict "Mostly Confirmed").
