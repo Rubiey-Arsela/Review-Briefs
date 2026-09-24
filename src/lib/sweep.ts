@@ -5,12 +5,13 @@
 // "Run Sweep Now" button also calls it directly for an on-demand refresh.
 //
 // It only checks outlets with a free, reliable public RSS feed that can actually
-// be fetched headlessly (Bernama, Malay Mail, The Guardian) — Reuters/The Star/
-// The Edge/The Sun return 403/404 or sit behind a Cloudflare bot challenge and
-// cannot be fetched from the edge; those still rely on the consultant's manual
-// entry + the Source Cross-Check search links.
+// be fetched headlessly — Reuters/The Star/The Edge/NST/The Sun's own site
+// (thesundaily.my)/Free Malaysia Today/Borneo Post all return 403/404 or sit
+// behind a Cloudflare bot challenge and cannot be fetched from the edge; those
+// still rely on the consultant's manual entry + the Source Cross-Check search
+// links.
 //
-// NOTE (24 Sep 2026 fix): the previous feed URLs for Bernama
+// NOTE (24 Sep 2026 fix #1): the original feed URLs for Bernama
 // ("/en/rss/general.xml") and NST ("/rss/latest") were both dead — Bernama's
 // returned a plain 404, and NST's sits behind a Cloudflare "Just a moment..."
 // bot-challenge page (403), so those two outlets silently produced zero items on
@@ -18,8 +19,28 @@
 // a named Al Bukhary entity or the curated keywords) was actually contributing —
 // this is why "Run Sweep Now" was only ever surfacing ~1 headline. Bernama's
 // working feed is "/en/rssfeed.php"; no working public NST feed could be found,
-// so it has been replaced with Malay Mail's feed (also one of the consultant's
-// 6 primary sources) which returns 50 items reliably.
+// so it was replaced with Malay Mail's feed (also one of the consultant's 6
+// primary sources).
+//
+// NOTE (24 Sep 2026 fix #2): ran a GenTeam Deep Research audit of every
+// Malaysian outlet's public RSS status, then independently re-verified each
+// candidate directly (the research agent's own live-fetch tests, cross-checked
+// against a second fetch from this sandbox — several outlets it reported as
+// "confirmed working" failed on retest and were excluded):
+//   - Free Malaysia Today (both /feed/ and /category/business/feed/) -> 403
+//     Cloudflare challenge on every attempt. EXCLUDED.
+//   - The Malaysian Insight (/feed) -> returns HTTP 200 but every item is
+//     dated 2024-2025 (stale/abandoned feed, not live). EXCLUDED.
+//   - Borneo Post (/feed/) -> 403 Cloudflare challenge. EXCLUDED.
+//   - CodeBlue (/feed/) -> flaky (429 rate-limited on first hit, 200 on
+//     retry) — too unreliable for an unattended scheduled sweep. EXCLUDED.
+// Three additional outlets verified genuinely working with fresh, same-day
+// items and added below: Malaysiakini (malaysiakini.com/rss/en/news.rss),
+// The Vibes (thevibes.com/rss, ~100 items), and The Sun (thesun.my/rss — the
+// live wordpress site, distinct from the dead thesundaily.my). This roughly
+// doubles outlet coverage from 3 to 6 and adds two more of the consultant's
+// beat topics (political/policy signal from Malaysiakini, broad wire-style
+// volume from The Vibes).
 import type { Bindings, Entity } from './types'
 import { parseRssItems } from './rss'
 import { CURATED_KEYWORDS } from './watchlist'
@@ -28,6 +49,9 @@ const RSS_FEEDS: Record<string, string> = {
   Bernama: 'https://www.bernama.com/en/rssfeed.php',
   'Malay Mail': 'https://www.malaymail.com/feed/rss/malaysia',
   'The Guardian': 'https://www.theguardian.com/world/malaysia/rss',
+  Malaysiakini: 'https://www.malaysiakini.com/rss/en/news.rss',
+  'The Vibes': 'https://www.thevibes.com/rss',
+  'The Sun': 'https://thesun.my/rss',
 }
 
 interface WatchTerm {

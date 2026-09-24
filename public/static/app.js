@@ -723,8 +723,8 @@ function renderSourceCheckTab(el, rows) {
   el.innerHTML = `
     <div class="card p-3 mb-4 text-sm text-slate-600">
       <i class="fas fa-circle-info mr-1 text-teal-700"></i>
-      Reuters, The Star, The Edge, Malay Mail and The Sun block automated fetching, so verification opens a site-restricted search per outlet in one click.
-      Bernama, NST and The Guardian have public feeds — where available, today's headlines are pulled directly for a quick eyeball match.
+      Reuters, The Star, The Edge and NST block automated fetching, so verification opens a site-restricted search per outlet in one click.
+      Bernama, Malay Mail, The Guardian, Malaysiakini, The Vibes and The Sun have public feeds — where available, today's headlines are pulled directly for a quick eyeball match.
     </div>
     <div class="space-y-3">
       ${rows.map((r, idx) => `
@@ -752,7 +752,7 @@ function renderSourceCheckTab(el, rows) {
       target.innerHTML = `<div class="flex flex-wrap gap-1.5 mt-1">${links.map((l) => `<a href="${l.url}" target="_blank" class="btn btn-secondary text-xs"><i class="fas fa-arrow-up-right-from-square"></i> ${escapeHtml(l.name)}</a>`).join('')}</div>`
 
       // Try live feeds for the outlets that support it
-      for (const outlet of ['Bernama', 'NST', 'The Guardian']) {
+      for (const outlet of ['Bernama', 'Malay Mail', 'The Guardian', 'Malaysiakini', 'The Vibes', 'The Sun']) {
         const feed = await API.sourceFeed(outlet)
         if (feed.available && feed.items?.length) {
           const feedDiv = document.createElement('div')
@@ -785,7 +785,7 @@ async function renderDailyLog(content) {
       </div>
     </div>
     ${sweepBanner(sweep)}
-    ${entries.length === 0 ? emptyState('No entries yet', 'Auto-sweep runs once a day against Bernama/NST/Guardian for your watchlist — or add developments manually as you find them.') : ''}
+    ${entries.length === 0 ? emptyState('No entries yet', 'Auto-sweep runs once a day against Bernama/Malay Mail/Guardian/Malaysiakini/The Vibes/The Sun for your watchlist — or add developments manually as you find them.') : ''}
     <div class="card overflow-hidden">
       <table class="data-table">
         <thead><tr><th style="width:9%">Date</th><th style="width:14%">Sector</th><th style="width:27%">Headline</th><th style="width:11%">Source</th><th style="width:9%">Priority</th><th style="width:8%">Origin</th><th style="width:12%">Used in</th><th style="width:10%">Actions</th></tr></thead>

@@ -6,14 +6,18 @@ import { parseRssItems } from '../lib/rss'
 const sourceCheck = new Hono<AppEnv>()
 
 // Public RSS feeds we can safely fetch server-side without a headless browser.
-// Reuters/The Star/The Edge/Malay Mail/NST/The Sun/The Guardian mostly block or
-// don't expose reliable free RSS at the edge — Bernama and The Guardian have
-// stable public feeds; NST has a general feed. Anything not listed falls back
-// to search-link-only mode.
+// Reuters/The Star/The Edge/NST are all bot-protected (403 Cloudflare
+// challenge) or 404 on every public feed path tested — those fall back to
+// search-link-only mode. Feed set kept in sync with src/lib/sweep.ts; see the
+// fix note there (24 Sep 2026) for the full verification history of which
+// outlets' feeds actually work vs. which only look like they should.
 const RSS_FEEDS: Record<string, string> = {
-  Bernama: 'https://www.bernama.com/en/rss/general.xml',
-  NST: 'https://www.nst.com.my/rss/latest',
+  Bernama: 'https://www.bernama.com/en/rssfeed.php',
+  'Malay Mail': 'https://www.malaymail.com/feed/rss/malaysia',
   'The Guardian': 'https://www.theguardian.com/world/malaysia/rss',
+  Malaysiakini: 'https://www.malaysiakini.com/rss/en/news.rss',
+  'The Vibes': 'https://www.thevibes.com/rss',
+  'The Sun': 'https://thesun.my/rss',
 }
 
 // GET /api/source-check/links?headline=...&date=...
