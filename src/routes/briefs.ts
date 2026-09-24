@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import type { AppEnv, Brief, BriefRow, Entity } from '../lib/types'
+import type { AppEnv, Brief, BriefRow, Entity, FactCheckSection, FactCheckSummaryRow } from '../lib/types'
 import { checkRow, checkAbbreviationsAcrossBrief, checkMovementAbbreviations, fingerprintIssue } from '../lib/compliance'
 import { findRedundancy, findIntraBriefRepetition, toRedundancyMatchRecord } from '../lib/redundancy'
 import { runFactCheckForRow } from '../lib/factcheck'
@@ -485,6 +485,112 @@ briefs.get('/:id/fact-checks', async (c) => {
     .bind(id)
     .all()
   return c.json({ fact_checks: results })
+})
+
+// ---------------------------------------------------------------------------
+// Deep Fact-Check Reports — a whole-brief, multi-source verification report
+// (topic-grouped claims, each checked against 1+ independently-named
+// external sources, e.g. Reuters/BNM/The Star/company press release). This
+// is generated OUTSIDE the Worker — a Cloudflare Worker cannot do
+// open-ended live web search without a paid third-party search API — by
+// asking the research consultant's AI assistant (which has real web-search
+// tools) to run the check and POST the structured result here. These routes
+// just store/serve/list/delete that result so it lives in the QA app
+// alongside the compliance/redundancy checks, instead of only existing as a
+// chat reply.
+// ---------------------------------------------------------------------------
+
+interface FactCheckReportPayload {
+  title: string
+  overall_verdict: string
+  overall_summary: string
+  sections: FactCheckSection[]
+  summary_table: FactCheckSummaryRow[]
+  conclusion: string
+  minor_issues?: string[]
+  report_markdown: string
+  generated_by?: string
+}
+
+// POST /api/briefs/:id/fact-check-reports — save a new Deep Fact-Check report
+briefs.post('/:id/fact-check-reports', async (c) => {
+  const id = Number(c.req.param('id'))
+  const brief = await c.env.DB.prepare('SELECT * FROM briefs WHERE id = ?').bind(id).first<Brief>()
+  if (!brief) return c.json({ error: 'Brief not found' }, 404)
+
+  const body = await c.req.json<FactCheckReportPayload>()
+  if (!body.title || !body.overall_verdict || !body.overall_summary || !Array.isArray(body.sections) || !Array.isArray(body.summary_table) || !body.conclusion || !body.report_markdown) {
+    return c.json({ error: 'Missing required fields: title, overall_verdict, overall_summary, sections[], summary_table[], conclusion, report_markdown' }, 400)
+  }
+
+  let claimCount = 0
+  let confirmedCount = 0
+  let discrepancyCount = 0
+  for (const section of body.sections) {
+    for (const claim of section.claims || []) {
+      claimCount++
+      if (claim.marker === '✅') confirmedCount++
+      else discrepancyCount++
+    }
+  }
+
+  const result = await c.env.DB.prepare(
+    `INSERT INTO fact_check_reports
+      (brief_id, title, overall_verdict, overall_summary, sections_json, summary_table_json, conclusion, minor_issues_json, report_markdown, generated_by, claim_count, confirmed_count, discrepancy_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      id,
+      body.title,
+      body.overall_verdict,
+      body.overall_summary,
+      JSON.stringify(body.sections),
+      JSON.stringify(body.summary_table),
+      body.conclusion,
+      body.minor_issues ? JSON.stringify(body.minor_issues) : null,
+      body.report_markdown,
+      body.generated_by || 'consultant_via_agent',
+      claimCount,
+      confirmedCount,
+      discrepancyCount
+    )
+    .run()
+
+  return c.json({ ok: true, id: result.meta.last_row_id, claim_count: claimCount, confirmed_count: confirmedCount, discrepancy_count: discrepancyCount })
+})
+
+// GET /api/briefs/:id/fact-check-reports — list all Deep Fact-Check reports for this brief (most recent first)
+briefs.get('/:id/fact-check-reports', async (c) => {
+  const id = c.req.param('id')
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, brief_id, title, overall_verdict, claim_count, confirmed_count, discrepancy_count, generated_by, created_at
+     FROM fact_check_reports WHERE brief_id = ? ORDER BY created_at DESC`
+  )
+    .bind(id)
+    .all()
+  return c.json({ reports: results })
+})
+
+// GET /api/briefs/:id/fact-check-reports/:reportId — full report detail
+briefs.get('/:id/fact-check-reports/:reportId', async (c) => {
+  const reportId = c.req.param('reportId')
+  const report = await c.env.DB.prepare('SELECT * FROM fact_check_reports WHERE id = ?').bind(reportId).first<any>()
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+  return c.json({
+    report: {
+      ...report,
+      sections: JSON.parse(report.sections_json),
+      summary_table: JSON.parse(report.summary_table_json),
+      minor_issues: report.minor_issues_json ? JSON.parse(report.minor_issues_json) : [],
+    },
+  })
+})
+
+// DELETE /api/briefs/:id/fact-check-reports/:reportId
+briefs.delete('/:id/fact-check-reports/:reportId', async (c) => {
+  const reportId = c.req.param('reportId')
+  await c.env.DB.prepare('DELETE FROM fact_check_reports WHERE id = ?').bind(reportId).run()
+  return c.json({ ok: true })
 })
 
 // ---------------------------------------------------------------------------

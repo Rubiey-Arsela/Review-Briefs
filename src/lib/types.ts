@@ -107,6 +107,55 @@ export interface FactCheck {
   checked_at: string
 }
 
+// A whole-brief, multi-source Deep Fact-Check report (topic-grouped claims,
+// each verified against 1+ independently-named external sources). Generated
+// externally by the research consultant's AI assistant using real web
+// search — see fact_check_reports migration comment for why this cannot be
+// a live Worker-side button without a paid search API — then POSTed in via
+// POST /api/briefs/:id/fact-check-reports.
+export interface FactCheckSource {
+  quote: string
+  source_name: string
+  source_date: string | null
+  source_url: string | null
+}
+
+export interface FactCheckClaim {
+  claim_number: number
+  marker: '✅' | '⚠️'
+  quoted_text: string
+  verdict_tag: string // e.g. 'CONFIRMED' | 'PARTIALLY DISCREPANT' | 'MOSTLY CONFIRMED'
+  sources: FactCheckSource[]
+}
+
+export interface FactCheckSection {
+  section_name: string
+  claims: FactCheckClaim[]
+}
+
+export interface FactCheckSummaryRow {
+  claim_number: number
+  verdict_line: string
+}
+
+export interface FactCheckReport {
+  id: number
+  brief_id: number
+  title: string
+  overall_verdict: string
+  overall_summary: string
+  sections_json: string // JSON FactCheckSection[]
+  summary_table_json: string // JSON FactCheckSummaryRow[]
+  conclusion: string
+  minor_issues_json: string | null // JSON string[]
+  report_markdown: string
+  generated_by: string
+  claim_count: number
+  confirmed_count: number
+  discrepancy_count: number
+  created_at: string
+}
+
 export interface RedundancyMatch {
   id?: number
   brief_id: number

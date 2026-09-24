@@ -60,6 +60,20 @@ const API = {
     return data.matches
   },
 
+  // Deep Fact-Check reports (multi-source, topic-grouped — see fact_check_reports migration)
+  async listFactCheckReports(briefId) {
+    const { data } = await axios.get(`/api/briefs/${briefId}/fact-check-reports`)
+    return data.reports
+  },
+  async getFactCheckReport(briefId, reportId) {
+    const { data } = await axios.get(`/api/briefs/${briefId}/fact-check-reports/${reportId}`)
+    return data.report
+  },
+  async deleteFactCheckReport(briefId, reportId) {
+    const { data } = await axios.delete(`/api/briefs/${briefId}/fact-check-reports/${reportId}`)
+    return data
+  },
+
   // Daily log
   async listDailyLog(params) {
     // Returns { entries, sweep, today } — GET auto-triggers the once-per-day
