@@ -43,6 +43,10 @@ table.data-table tr:hover td { background: #f8fafc; }
 .impact-Negative { color: #b91c1c; font-weight: 700; }
 .impact-Neutral { color: #475569; font-weight: 700; }
 .impact-Mixed { color: #92400e; font-weight: 700; }
+.impact-Strategic-Benchmark { color: #1d4ed8; font-weight: 700; }
+.impact-Opportunity-Watch { color: #7c3aed; font-weight: 700; }
+.impact-Policy-Watch { color: #0f766e; font-weight: 700; }
+.impact-High-Strategic-Relevance { color: #b45309; font-weight: 700; }
 
 textarea, input[type=text], input[type=date], input[type=url], select {
   border: 1px solid #cbd5e1; border-radius: 0.4rem; padding: 0.4rem 0.55rem; font-size: 0.85rem; width: 100%;

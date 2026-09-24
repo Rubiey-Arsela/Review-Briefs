@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { AppEnv, Brief, BriefRow, Entity } from '../lib/types'
-import { checkRow } from '../lib/compliance'
+import { checkRow, checkAbbreviationsAcrossBrief } from '../lib/compliance'
 import { findRedundancy, toRedundancyMatchRecord } from '../lib/redundancy'
 
 const briefs = new Hono<AppEnv>()
@@ -288,6 +288,13 @@ briefs.post('/:id/check', async (c) => {
     for (const issue of issues) {
       allIssues.push({ row_id: row.id, rule_code: issue.rule_code, severity: issue.severity, message: issue.message, excerpt: issue.excerpt })
     }
+  }
+
+  // Brief-wide check: abbreviations (BESS, DCTF, NIF, NRW, WTP, PUE, TBIP, SAC)
+  // must be expanded on their first use anywhere in the brief.
+  const abbrevFlags = checkAbbreviationsAcrossBrief(rows)
+  for (const { row_id, issue } of abbrevFlags) {
+    allIssues.push({ row_id, rule_code: issue.rule_code, severity: issue.severity, message: issue.message, excerpt: issue.excerpt })
   }
 
   for (const issue of allIssues) {

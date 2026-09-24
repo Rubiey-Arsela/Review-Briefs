@@ -212,13 +212,18 @@ function stripLeadingRefTags(text) {
   return text.replace(/^\s*(\[[A-Za-z0-9]+\]\s*)+/, '').trim()
 }
 
+// Grade openers can be single-word (Positive./Negative./Neutral./Mixed.) or
+// multi-word (Strategic Benchmark./Opportunity Watch./Policy Watch./High
+// Strategic Relevance.) per the manager's updated checklist v2.
+const VALID_GRADES = ['Positive', 'Negative', 'Neutral', 'Mixed', 'Strategic Benchmark', 'Opportunity Watch', 'Policy Watch', 'High Strategic Relevance']
+
 function splitImpactGrade(cellText) {
-  const match = cellText.trim().match(/^([A-Za-z]+)\.\s*([\s\S]*)$/)
-  const validGrades = ['Positive', 'Negative', 'Neutral', 'Mixed']
-  if (match && validGrades.includes(match[1])) {
-    return { grade: match[1], text: cellText.trim() }
+  const trimmed = cellText.trim()
+  const match = trimmed.match(/^([A-Z][a-zA-Z]*(?:\s[A-Z][a-zA-Z]*){0,3})\.\s*([\s\S]*)$/)
+  if (match && VALID_GRADES.includes(match[1])) {
+    return { grade: match[1], text: trimmed }
   }
-  return { grade: null, text: cellText.trim() || null }
+  return { grade: null, text: trimmed || null }
 }
 
 // Best-effort PDF row reconstruction: scan lines for the Impact-opener pattern
@@ -235,7 +240,7 @@ function extractRowsFromPlainText(lines) {
     buffer = []
     if (!joined) return
 
-    const impactMatch = joined.match(/\b(Positive|Negative|Neutral|Mixed)\.\s+([\s\S]+)$/)
+    const impactMatch = joined.match(/\b(Positive|Negative|Neutral|Mixed|Strategic Benchmark|Opportunity Watch|Policy Watch|High Strategic Relevance)\.\s+([\s\S]+)$/)
     let headlineSummary = joined
     let grade = null
     let impactText = null
@@ -287,7 +292,7 @@ function extractRowsFromPlainText(lines) {
     buffer.push(trimmed)
     // If this line ends an impact statement (grade + full stop somewhere, and
     // ends with a full stop), treat it as the end of one row.
-    if (/\b(Positive|Negative|Neutral|Mixed)\./.test(buffer.join(' ')) && /[.!?]\s*$/.test(trimmed)) {
+    if (/\b(Positive|Negative|Neutral|Mixed|Strategic Benchmark|Opportunity Watch|Policy Watch|High Strategic Relevance)\./.test(buffer.join(' ')) && /[.!?]\s*$/.test(trimmed)) {
       flush()
     }
   }

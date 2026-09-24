@@ -33,7 +33,7 @@ export interface BriefRow {
   source_date: string | null
   source_url: string | null
   summary: string | null
-  impact_grade: 'Positive' | 'Negative' | 'Neutral' | 'Mixed' | null
+  impact_grade: 'Positive' | 'Negative' | 'Neutral' | 'Mixed' | 'Strategic Benchmark' | 'Opportunity Watch' | 'Policy Watch' | 'High Strategic Relevance' | null
   impact_text: string | null
   regulatory_text: string | null
   entities: string | null // JSON array

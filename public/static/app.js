@@ -16,7 +16,7 @@ const SECTORS = [
   'Banking/Financial Services', 'Watchlist', 'Speed Read', 'Other',
 ]
 
-const IMPACT_GRADES = ['Positive', 'Negative', 'Neutral', 'Mixed']
+const IMPACT_GRADES = ['Positive', 'Negative', 'Neutral', 'Mixed', 'Strategic Benchmark', 'Opportunity Watch', 'Policy Watch', 'High Strategic Relevance']
 
 // ---------------------------------------------------------------------------
 // Router
@@ -512,8 +512,12 @@ function renderRowsTab(el, brief, rows) {
   }))
 }
 
+function gradeSlug(grade) {
+  return grade ? `impact-${grade.replace(/\s+/g, '-')}` : ''
+}
+
 function rowTr(r) {
-  const gradeClass = r.impact_grade ? `impact-${r.impact_grade}` : ''
+  const gradeClass = gradeSlug(r.impact_grade)
   return `
     <tr>
       <td>
@@ -521,7 +525,7 @@ function rowTr(r) {
         <div class="text-xs text-slate-400 mt-0.5">${escapeHtml(r.source_name || '—')}${r.source_date ? ', ' + escapeHtml(r.source_date) : ''}</div>
       </td>
       <td class="text-slate-600">${escapeHtml(truncate(r.summary, 140))}</td>
-      <td><span class="${gradeClass}">${escapeHtml(r.impact_grade || '—')}.</span> <span class="text-slate-600">${escapeHtml(truncate((r.impact_text || '').replace(/^[A-Za-z]+\.\s*/, ''), 140))}</span></td>
+      <td><span class="${gradeClass}">${escapeHtml(r.impact_grade || '—')}.</span> <span class="text-slate-600">${escapeHtml(truncate((r.impact_text || '').replace(/^[A-Za-z][A-Za-z\s]*?\.\s*/, ''), 140))}</span></td>
       <td class="text-slate-600">${escapeHtml(truncate(r.regulatory_text, 80) || '-')}</td>
       <td>
         <button class="text-teal-700 hover:text-teal-900 mr-2" data-edit-row="${r.id}" title="Edit"><i class="fas fa-pen"></i></button>
@@ -576,8 +580,10 @@ function showRowEditModal(briefId, row) {
     const gradeVal = document.getElementById('rf-grade').value
     let impactText = document.getElementById('rf-impact').value.trim()
     // Auto-prefix the grade if the user selected one but didn't type it into the text
-    if (gradeVal && !new RegExp(`^${gradeVal}\\.`).test(impactText)) {
-      impactText = impactText ? `${gradeVal}. ${impactText.replace(/^[A-Za-z]+\.\s*/, '')}` : `${gradeVal}. `
+    // (grades can be multi-word, e.g. "Strategic Benchmark.", so escape + match loosely)
+    const escapedGrade = gradeVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (gradeVal && !new RegExp(`^${escapedGrade}\\.`).test(impactText)) {
+      impactText = impactText ? `${gradeVal}. ${impactText.replace(/^[A-Z][A-Za-z\s]*?\.\s*/, '')}` : `${gradeVal}. `
     }
     const payload = {
       sector: document.getElementById('rf-sector').value,
@@ -623,6 +629,8 @@ async function renderComplianceTab(el, brief) {
   const ruleLabel = {
     banned_word: 'Banned word', impact_opener: 'Impact opener format', x_from_y: 'Missing "X from Y" base',
     entity_generic: 'Generic Group reference', entity_alias: 'Entity name/ownership', no_source: 'Missing source', weak_language: 'Certainty language',
+    transmission_mechanism: 'Missing transmission mechanism', entity_missing_in_impact: 'No named business in Impact',
+    headline_summary_mismatch: 'Headline/Summary mismatch', abbreviation_expansion: 'Abbreviation not expanded',
   }
 
   el.innerHTML = `
