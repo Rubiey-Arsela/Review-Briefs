@@ -161,11 +161,38 @@ const MOVEMENT_ABBREVIATIONS: { abbr: string; full: string }[] = [
 // --- Rule 4/9: transmission-mechanism connectors -----------------------------
 // A valid causal chain either uses an explicit arrow, or one of these phrases
 // that shows how the news reaches the business (cost/margin/demand/timing/etc).
+// v5 (24 Sep 2026): expanded significantly after spot-checking against a real
+// director-approved edition (18 Sept 2026 "Clean") — the original list missed
+// ~35 genuinely well-written Impact cells that DO show a causal chain, just in
+// phrasing the keyword list didn't cover (e.g. "lifts delivered oil costs",
+// "demand backdrop for", "gains only if", "sets the timetable for"). A few
+// truly bare cells (no transmission mechanism at all, e.g. the Net Foreign
+// Flow indicator row) still correctly flag — that is a real gap, not a false
+// positive, and is exactly the kind of case the reviewer comment/dismiss
+// system (see checkRow callers) exists for.
 const TRANSMISSION_CONNECTORS = [
   '→', '->', 'leading to', 'resulting in', 'which means', 'translat', 'flows through',
-  'as a result', 'in turn', 'thereby', 'pressuring', 'pressures', 'narrowing', 'widening',
-  'squeezing', 'raising', 'lowering', 'affects', 'channel', 'benchmark for', 'read-through',
-  'implication for', 'exposure to', 'transmission',
+  'as a result', 'in turn', 'thereby', 'pressuring', 'pressures', 'pressure', 'narrowing', 'widening',
+  'widens', 'squeezing', 'raising', 'raises', 'lowering', 'lowers', 'lifts', 'cuts', 'cutting',
+  'drops', 'boosts', 'affects', 'channel', 'benchmark for', 'read-through', 'no read-through',
+  'implication for', 'exposure to', 'exposure is', 'transmission',
+  'backdrop for', 'only if', 'cost of', 'costs rise', 'cost more', 'tracks', 'hits', 'depends on',
+  'depend on', 'turns on', 'turn on', 'feed straight into', 'feed into', 'feeds into',
+  'compete on', 'competes on', 'sets the', 'outlet for', 'bids for', 'open bids', 'pipeline for',
+  'opening for', 'tenant pool', 'broadens', 'broaden', 'no direct channel', 'no direct allocation',
+  'no direct group channel', 'no group channel',
+]
+
+// Phrases that explicitly and correctly state there is NO Al Bukhary linkage —
+// this is a legitimate, deliberate editorial choice (never invent a channel
+// that doesn't exist), not a rule violation. When one of these appears, an
+// otherwise-unnamed Impact cell is downgraded from an error to an info nudge
+// rather than treated as a missed-entity mistake.
+const NO_LINKAGE_DISCLAIMER_PHRASES = [
+  'no direct group channel', 'no group channel', 'no direct al bukhary exposure',
+  'no group exposure', 'limited direct group impact', 'no direct allocation',
+  'no direct channel', 'no read-through', 'no read through', 'nothing is committed',
+  'no group participation',
 ]
 
 export function checkBannedWords(text: string, source: 'headline' | 'summary' | 'impact' | 'regulatory'): ComplianceIssue[] {
@@ -310,6 +337,12 @@ export function checkEntities(text: string | null, fieldName: string, entities: 
       aliases = []
     }
     for (const alias of aliases) {
+      // Skip aliases that are just a case-variant of the entity's own canonical
+      // name (e.g. "PROTON" as an alias of "Proton") — that is not a naming
+      // trap to correct, it is the correct name written in a different case.
+      // This exact bug was flagging every correct mention of "Proton" in the
+      // 18 Sept 2026 approved edition as if it needed fixing.
+      if (alias.toLowerCase() === entity.name.toLowerCase()) continue
       const pattern = new RegExp(`\\b${escapeRegex(alias)}\\b`, 'i')
       if (pattern.test(text)) {
         issues.push({
@@ -344,6 +377,13 @@ export function checkEntities(text: string | null, fieldName: string, entities: 
 
 // Rule 3: every Impact must link to a SPECIFIC Al Bukhary business — not just
 // avoid the word "Group", but actually name a real entity from the ownership map.
+// v5 (24 Sep 2026): downgraded to an info-level nudge (not an error) when the
+// cell explicitly and correctly states there is no linkage — e.g. "no direct
+// Group channel", "no direct allocation identified". Saying so explicitly is
+// the CORRECT house style (never invent a channel that doesn't exist); the
+// real 18 Sept 2026 approved edition does this multiple times (Strait of
+// Hormuz, Saudi pipeline rerouting, PETRONAS/PTT gas-block contract) and it
+// should not be treated the same as simply forgetting to name a business.
 export function checkEntityLinkage(impactText: string | null, entities: Entity[]): ComplianceIssue[] {
   const issues: ComplianceIssue[] = []
   if (!impactText || !impactText.trim()) return issues
@@ -362,14 +402,27 @@ export function checkEntityLinkage(impactText: string | null, entities: Entity[]
 
   const found = names.some((n) => n && new RegExp(`\\b${escapeRegex(n)}\\b`, 'i').test(impactText))
   if (!found) {
-    issues.push({
-      brief_id: 0,
-      row_id: null,
-      rule_code: 'entity_missing_in_impact',
-      severity: 'error',
-      message: 'Impact does not name a specific Al Bukhary business from the ownership map. Every impact must be linked to a named entity (e.g. "Malakoff", "MMC Ports", "Bank Muamalat") — never left generic.',
-      excerpt: impactText.slice(0, 80),
-    })
+    const lower = impactText.toLowerCase()
+    const hasExplicitDisclaimer = NO_LINKAGE_DISCLAIMER_PHRASES.some((p) => lower.includes(p))
+    if (hasExplicitDisclaimer) {
+      issues.push({
+        brief_id: 0,
+        row_id: null,
+        rule_code: 'entity_missing_in_impact',
+        severity: 'info',
+        message: 'Impact does not name a specific Al Bukhary business, but explicitly states there is no linkage — confirm this absence of a channel is genuinely correct rather than an unresearched gap.',
+        excerpt: impactText.slice(0, 80),
+      })
+    } else {
+      issues.push({
+        brief_id: 0,
+        row_id: null,
+        rule_code: 'entity_missing_in_impact',
+        severity: 'error',
+        message: 'Impact does not name a specific Al Bukhary business from the ownership map, and does not explicitly state that no linkage exists either. Every impact must either name a real entity (e.g. "Malakoff", "MMC Ports", "Bank Muamalat") or explicitly say there is no direct channel — never left silently generic.',
+        excerpt: impactText.slice(0, 80),
+      })
+    }
   }
   return issues
 }
@@ -633,10 +686,25 @@ export function checkGradePerspective(impactGrade: string | null, impactText: st
 // "as of <month>" or a specific month name near another figure qualified
 // "in <year>" without a matching month — genuinely hard to detect reliably,
 // so kept as info-level only.
-export function checkMovementAbbreviations(rows: BriefRow[]): { row_id: number; issue: ComplianceIssue }[] {
+export function checkMovementAbbreviations(
+  rows: BriefRow[],
+  briefRawText?: string | null
+): { row_id: number; issue: ComplianceIssue }[] {
   const flagged: { row_id: number; issue: ComplianceIssue }[] = []
   const expandedAnywhere = new Set<string>()
   const sorted = [...rows].sort((a, b) => (a.row_order ?? 0) - (b.row_order ?? 0))
+
+  // v5 (24 Sep 2026): also check the raw document text (Exec Summary etc.) —
+  // same rationale as checkAbbreviationsAcrossBrief above. The real 18 Sept
+  // 2026 edition expands "year on year (yoy)" and similar in the Exec Summary
+  // narrative, not inside a table cell.
+  if (briefRawText) {
+    for (const { abbr, full } of MOVEMENT_ABBREVIATIONS) {
+      if (new RegExp(full.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&'), 'i').test(briefRawText)) {
+        expandedAnywhere.add(abbr)
+      }
+    }
+  }
 
   // First pass: does the brief expand any of these anywhere at all?
   for (const row of sorted) {
@@ -764,11 +832,35 @@ export function checkRow(row: Partial<BriefRow>, entities: Entity[]): Compliance
 // (not per-row) — e.g. the first time "BESS" appears anywhere in the brief, that
 // same row must also contain "Battery Energy Storage Systems". Subsequent uses
 // of the abbreviation elsewhere in the brief are fine on their own.
-export function checkAbbreviationsAcrossBrief(rows: BriefRow[]): { row_id: number; issue: ComplianceIssue }[] {
+//
+// v5 (24 Sep 2026): added the optional briefRawText parameter. Real Weekly
+// Briefs commonly expand an abbreviation ONCE in the Executive Summary or a
+// table footnote (e.g. "Bank Negara Malaysia (BNM)") rather than inside the
+// row cells themselves — checking row cells alone produced false positives
+// against the real 18 Sept 2026 approved edition for BNM, LNG and AI, all of
+// which ARE expanded, just outside the 4-column table structure this engine
+// otherwise scans. If the full raw document text (parsed client-side by
+// mammoth.js on upload — see BriefRow.raw_text on the parent brief) shows the
+// expansion anywhere, that counts as satisfying the rule brief-wide.
+export function checkAbbreviationsAcrossBrief(
+  rows: BriefRow[],
+  briefRawText?: string | null
+): { row_id: number; issue: ComplianceIssue }[] {
   const flagged: { row_id: number; issue: ComplianceIssue }[] = []
   const expanded = new Set<string>()
 
   const sorted = [...rows].sort((a, b) => (a.row_order ?? 0) - (b.row_order ?? 0))
+
+  // Pre-seed: anything already expanded in the raw document (Exec Summary,
+  // Speed Read, table footnotes) counts as satisfied brief-wide, since those
+  // sections are read before/alongside the tables and the rule's real intent
+  // (never leave a reader guessing what an abbreviation means) is met.
+  if (briefRawText) {
+    for (const { abbr, full } of REQUIRED_ABBREVIATIONS) {
+      const fullPattern = new RegExp(full.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      if (fullPattern.test(briefRawText)) expanded.add(abbr)
+    }
+  }
 
   for (const row of sorted) {
     const fullText = [row.headline, row.summary, row.impact_text, row.regulatory_text].filter(Boolean).join(' \n ')
@@ -790,7 +882,7 @@ export function checkAbbreviationsAcrossBrief(rows: BriefRow[]): { row_id: numbe
             row_id: row.id,
             rule_code: 'abbreviation_expansion',
             severity: 'warning',
-            message: `First use of "${abbr}" in this brief should be expanded — write "${full} (${abbr})" on first mention.`,
+            message: `First use of "${abbr}" in this brief should be expanded — write "${full} (${abbr})" on first mention (checked against row cells and the Executive Summary/footnotes).`,
             excerpt: extractExcerpt(fullText, abbr),
           },
         })
@@ -800,6 +892,16 @@ export function checkAbbreviationsAcrossBrief(rows: BriefRow[]): { row_id: numbe
   }
 
   return flagged
+}
+
+// Stable content fingerprint for a compliance issue, used so a reviewer's
+// dismiss/comment on a finding SURVIVES Run Check deleting and re-inserting
+// all issues on every run — matched on rule + row + message text rather than
+// the issue's own auto-incrementing id (which changes every re-check).
+export async function fingerprintIssue(rowId: number | null, ruleCode: string, message: string): Promise<string> {
+  const raw = `${rowId ?? 'brief'}::${ruleCode}::${message}`
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32)
 }
 
 function escapeRegex(s: string): string {

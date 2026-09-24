@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import type { AppEnv, Brief, BriefRow, Entity } from '../lib/types'
-import { checkRow, checkAbbreviationsAcrossBrief, checkMovementAbbreviations } from '../lib/compliance'
+import { checkRow, checkAbbreviationsAcrossBrief, checkMovementAbbreviations, fingerprintIssue } from '../lib/compliance'
 import { findRedundancy, findIntraBriefRepetition, toRedundancyMatchRecord } from '../lib/redundancy'
+import { runFactCheckForRow } from '../lib/factcheck'
 
 const briefs = new Hono<AppEnv>()
 
@@ -291,23 +292,29 @@ briefs.post('/:id/check', async (c) => {
   }
 
   // Brief-wide check: abbreviations (BESS, DCTF, NIF, NRW, WTP, PUE, TBIP, SAC,
-  // plus the v3 long tail) must be expanded on their first use anywhere in the brief.
-  const abbrevFlags = checkAbbreviationsAcrossBrief(rows)
+  // plus the v3 long tail) must be expanded on their first use anywhere in the
+  // brief. v5: also checks brief.raw_text (Exec Summary/footnotes), since real
+  // editions often expand an abbreviation there rather than inside a table cell.
+  const abbrevFlags = checkAbbreviationsAcrossBrief(rows, brief.raw_text)
   for (const { row_id, issue } of abbrevFlags) {
     allIssues.push({ row_id, rule_code: issue.rule_code, severity: issue.severity, message: issue.message, excerpt: issue.excerpt })
   }
 
   // Brief-wide check (v3): mom/yoy/wow/qoq movement abbreviations never expanded anywhere.
-  const movementFlags = checkMovementAbbreviations(rows)
+  const movementFlags = checkMovementAbbreviations(rows, brief.raw_text)
   for (const { row_id, issue } of movementFlags) {
     allIssues.push({ row_id, rule_code: issue.rule_code, severity: issue.severity, message: issue.message, excerpt: issue.excerpt })
   }
 
+  // v5: compute a stable content fingerprint for every issue BEFORE inserting,
+  // so a reviewer's earlier dismiss/comment (keyed on the same fingerprint)
+  // carries forward even though this DELETE+INSERT gives each issue a new id.
   for (const issue of allIssues) {
+    const fingerprint = await fingerprintIssue(issue.row_id, issue.rule_code, issue.message)
     await c.env.DB.prepare(
-      `INSERT INTO compliance_issues (brief_id, row_id, rule_code, severity, message, excerpt) VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO compliance_issues (brief_id, row_id, rule_code, severity, message, excerpt, fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
-      .bind(id, issue.row_id, issue.rule_code, issue.severity, issue.message, issue.excerpt)
+      .bind(id, issue.row_id, issue.rule_code, issue.severity, issue.message, issue.excerpt, fingerprint)
       .run()
   }
 
@@ -369,18 +376,115 @@ briefs.post('/:id/check', async (c) => {
 })
 
 // ---------------------------------------------------------------------------
-// GET /api/briefs/:id/compliance — retrieve stored compliance issues
+// GET /api/briefs/:id/compliance — retrieve stored compliance issues, joined
+// with any reviewer judgement (dismissed/acknowledged + comment) so a prior
+// "not applicable" ruling on a finding is visible instead of looking new
+// again after every Run Check.
 // ---------------------------------------------------------------------------
 briefs.get('/:id/compliance', async (c) => {
   const id = c.req.param('id')
   const { results } = await c.env.DB.prepare(
-    `SELECT ci.*, r.headline, r.sector FROM compliance_issues ci
+    `SELECT ci.*, r.headline, r.sector,
+            cr.status as review_status, cr.comment as review_comment, cr.reviewed_by as review_by, cr.updated_at as review_updated_at
+     FROM compliance_issues ci
      LEFT JOIN brief_rows r ON r.id = ci.row_id
+     LEFT JOIN compliance_reviews cr ON cr.brief_id = ci.brief_id AND cr.fingerprint = ci.fingerprint
      WHERE ci.brief_id = ? ORDER BY ci.severity ASC, ci.id ASC`
   )
     .bind(id)
     .all()
   return c.json({ issues: results })
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/briefs/:id/compliance/review — record a reviewer judgement
+// (dismiss as not-applicable, acknowledge, or just leave a comment) on a
+// specific compliance finding. Upserts on (brief_id, fingerprint) so re-
+// reviewing the same finding updates rather than duplicates.
+// ---------------------------------------------------------------------------
+briefs.post('/:id/compliance/review', async (c) => {
+  const id = Number(c.req.param('id'))
+  const body = await c.req.json<{ fingerprint: string; row_id?: number | null; rule_code: string; status: 'open' | 'dismissed' | 'acknowledged'; comment?: string; reviewed_by?: string }>()
+  if (!body.fingerprint || !body.rule_code || !body.status) {
+    return c.json({ error: 'fingerprint, rule_code and status are required' }, 400)
+  }
+
+  const existing = await c.env.DB.prepare(
+    `SELECT * FROM compliance_reviews WHERE brief_id = ? AND fingerprint = ?`
+  )
+    .bind(id, body.fingerprint)
+    .first()
+
+  if (existing) {
+    await c.env.DB.prepare(
+      `UPDATE compliance_reviews SET status = ?, comment = ?, reviewed_by = ?, updated_at = datetime('now') WHERE id = ?`
+    )
+      .bind(body.status, body.comment ?? null, body.reviewed_by ?? null, (existing as any).id)
+      .run()
+  } else {
+    await c.env.DB.prepare(
+      `INSERT INTO compliance_reviews (brief_id, row_id, rule_code, fingerprint, status, comment, reviewed_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(id, body.row_id ?? null, body.rule_code, body.fingerprint, body.status, body.comment ?? null, body.reviewed_by ?? null)
+      .run()
+  }
+
+  return c.json({ ok: true })
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/briefs/:id/fact-check — run fact-check against ALL rows that have
+// a source_url (fetches each live article + LLM comparison). Upserts into
+// fact_checks keyed on row_id so re-running refreshes rather than duplicates.
+// ---------------------------------------------------------------------------
+briefs.post('/:id/fact-check', async (c) => {
+  const id = Number(c.req.param('id'))
+  const brief = await c.env.DB.prepare('SELECT * FROM briefs WHERE id = ?').bind(id).first<Brief>()
+  if (!brief) return c.json({ error: 'Brief not found' }, 404)
+
+  const { results: rows } = await c.env.DB.prepare('SELECT * FROM brief_rows WHERE brief_id = ?').bind(id).all<BriefRow>()
+
+  let checked = 0
+  let matches = 0
+  let discrepancies = 0
+  let unverifiable = 0
+
+  for (const row of rows) {
+    if (!row.source_url) continue // skip rows with no source (e.g. Weekly Macro Pulse indicator rows)
+    const result = await runFactCheckForRow(row, c.env)
+    checked++
+    if (result.verdict === 'match') matches++
+    else if (result.verdict === 'discrepancy') discrepancies++
+    else unverifiable++
+
+    await c.env.DB.prepare(
+      `INSERT INTO fact_checks (brief_id, row_id, source_url, verdict, summary, details, fetch_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(row_id) DO UPDATE SET
+         source_url = excluded.source_url, verdict = excluded.verdict, summary = excluded.summary,
+         details = excluded.details, fetch_status = excluded.fetch_status, checked_at = datetime('now')`
+    )
+      .bind(id, row.id, row.source_url, result.verdict, result.summary, JSON.stringify(result.details), result.fetch_status)
+      .run()
+  }
+
+  return c.json({ ok: true, checked, matches, discrepancies, unverifiable, skipped_no_url: rows.length - checked })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/briefs/:id/fact-checks — retrieve stored fact-check results
+// ---------------------------------------------------------------------------
+briefs.get('/:id/fact-checks', async (c) => {
+  const id = c.req.param('id')
+  const { results } = await c.env.DB.prepare(
+    `SELECT fc.*, r.headline, r.sector FROM fact_checks fc
+     JOIN brief_rows r ON r.id = fc.row_id
+     WHERE fc.brief_id = ? ORDER BY r.row_order ASC`
+  )
+    .bind(id)
+    .all()
+  return c.json({ fact_checks: results })
 })
 
 // ---------------------------------------------------------------------------

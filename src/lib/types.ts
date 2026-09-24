@@ -3,6 +3,8 @@
 export type Bindings = {
   DB: D1Database
   FILES: R2Bucket
+  OPENAI_API_KEY?: string
+  OPENAI_BASE_URL?: string
 }
 
 export type AppEnv = { Bindings: Bindings }
@@ -75,6 +77,34 @@ export interface ComplianceIssue {
   severity: 'error' | 'warning' | 'info'
   message: string
   excerpt: string | null
+  fingerprint?: string
+}
+
+// A human (director/consultant) judgement on a compliance finding — keyed on
+// a content fingerprint so it survives Run Check deleting/re-inserting issues.
+export interface ComplianceReview {
+  id: number
+  brief_id: number
+  row_id: number | null
+  rule_code: string
+  fingerprint: string
+  status: 'open' | 'dismissed' | 'acknowledged'
+  comment: string | null
+  reviewed_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface FactCheck {
+  id: number
+  brief_id: number
+  row_id: number
+  source_url: string
+  verdict: 'match' | 'discrepancy' | 'unverifiable'
+  summary: string
+  details: string | null // JSON array of { field, brief_said, source_said }
+  fetch_status: 'ok' | 'fetch_failed' | 'no_url'
+  checked_at: string
 }
 
 export interface RedundancyMatch {
