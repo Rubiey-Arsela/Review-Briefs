@@ -41,6 +41,16 @@
 // doubles outlet coverage from 3 to 6 and adds two more of the consultant's
 // beat topics (political/policy signal from Malaysiakini, broad wire-style
 // volume from The Vibes).
+//
+// NOTE (24 Sep 2026 fix #3): the Daily News Log is meant as a high-priority
+// alert feed for the Group, not a raw wire dump — normal-priority keyword
+// hits (e.g. "ringgit", "GDP", "port", "palm oil") were cluttering it with
+// generic macro/sector chatter that has no direct Al Bukhary relevance.
+// Auto-sweep now only matches against high-priority terms (every named
+// entity/alias, plus the subset of CURATED_KEYWORDS tagged 'high' — e.g.
+// Bank Negara, OPR, Budget 2027, tariff, rice supply, fuel subsidy, data
+// centre, Proton). Normal-priority terms remain defined in watchlist.ts for
+// potential future use (e.g. a broader "watch" tab) but are excluded here.
 import type { Bindings, Entity } from './types'
 import { parseRssItems } from './rss'
 import { CURATED_KEYWORDS } from './watchlist'
@@ -120,7 +130,13 @@ export async function runAutoSweep(db: Bindings['DB'], force = false): Promise<S
   }
 
   const { results: entityRows } = await db.prepare('SELECT * FROM entities').all<Entity>()
-  const terms = buildWatchTerms(entityRows || [])
+  // Daily News Log should only surface items that are high priority for the
+  // Group — restrict matching to high-priority terms only (all named
+  // entities/aliases are always 'high'; only a subset of CURATED_KEYWORDS
+  // is). Filtering the term list up front (rather than checking hit.priority
+  // after the fact) also avoids any ambiguity from matchTerm() returning the
+  // first hit in list order when both a high and normal term could match.
+  const terms = buildWatchTerms(entityRows || []).filter((t) => t.priority === 'high')
 
   const checkedOutlets: string[] = []
   let itemsSeen = 0
