@@ -4,18 +4,29 @@
 // off automatically the first time anyone hits GET /api/daily-log that day. A
 // "Run Sweep Now" button also calls it directly for an on-demand refresh.
 //
-// It only checks outlets with a free, reliable public RSS feed (Bernama, NST,
-// The Guardian) — Reuters/The Star/The Edge/Malay Mail/The Sun are paywalled or
-// bot-blocked and cannot be fetched headlessly from the edge; those still rely on
-// the consultant's manual entry + the Source Cross-Check search links.
-
+// It only checks outlets with a free, reliable public RSS feed that can actually
+// be fetched headlessly (Bernama, Malay Mail, The Guardian) — Reuters/The Star/
+// The Edge/The Sun return 403/404 or sit behind a Cloudflare bot challenge and
+// cannot be fetched from the edge; those still rely on the consultant's manual
+// entry + the Source Cross-Check search links.
+//
+// NOTE (24 Sep 2026 fix): the previous feed URLs for Bernama
+// ("/en/rss/general.xml") and NST ("/rss/latest") were both dead — Bernama's
+// returned a plain 404, and NST's sits behind a Cloudflare "Just a moment..."
+// bot-challenge page (403), so those two outlets silently produced zero items on
+// every sweep and only The Guardian's Malaysia-only feed (which rarely mentions
+// a named Al Bukhary entity or the curated keywords) was actually contributing —
+// this is why "Run Sweep Now" was only ever surfacing ~1 headline. Bernama's
+// working feed is "/en/rssfeed.php"; no working public NST feed could be found,
+// so it has been replaced with Malay Mail's feed (also one of the consultant's
+// 6 primary sources) which returns 50 items reliably.
 import type { Bindings, Entity } from './types'
 import { parseRssItems } from './rss'
 import { CURATED_KEYWORDS } from './watchlist'
 
 const RSS_FEEDS: Record<string, string> = {
-  Bernama: 'https://www.bernama.com/en/rss/general.xml',
-  NST: 'https://www.nst.com.my/rss/latest',
+  Bernama: 'https://www.bernama.com/en/rssfeed.php',
+  'Malay Mail': 'https://www.malaymail.com/feed/rss/malaysia',
   'The Guardian': 'https://www.theguardian.com/world/malaysia/rss',
 }
 
