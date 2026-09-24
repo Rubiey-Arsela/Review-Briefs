@@ -50,6 +50,8 @@ export interface DailyLogEntry {
   note: string | null
   priority: 'high' | 'normal' | 'watch'
   used_in_brief_id: number | null
+  origin: 'auto' | 'manual'
+  matched_term: string | null
   created_at: string
 }
 

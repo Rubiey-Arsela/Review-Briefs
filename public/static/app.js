@@ -747,20 +747,24 @@ function renderSourceCheckTab(el, rows) {
 // ===========================================================================
 async function renderDailyLog(content) {
   content.innerHTML = `<div class="flex items-center justify-center py-16"><div class="spinner"></div></div>`
-  const entries = await API.listDailyLog()
+  const { entries, sweep } = await API.listDailyLog()
 
   content.innerHTML = `
-    <div class="flex items-center justify-between mb-5">
+    <div class="flex items-center justify-between mb-3">
       <div>
         <h2 class="text-xl font-bold text-teal-900">Daily News Log</h2>
         <p class="text-sm text-slate-500 mt-1">Track Monday–Thursday developments so Friday's brief draft isn't starting cold. Mirrors your Gen Team's daily sweep.</p>
       </div>
-      <button class="btn btn-primary" id="btn-add-log"><i class="fas fa-plus"></i> Add Entry</button>
+      <div class="flex items-center gap-2">
+        <button class="btn btn-secondary" id="btn-run-sweep"><i class="fas fa-arrows-rotate"></i> Run Sweep Now</button>
+        <button class="btn btn-primary" id="btn-add-log"><i class="fas fa-plus"></i> Add Entry</button>
+      </div>
     </div>
-    ${entries.length === 0 ? emptyState('No entries yet', 'Add today\'s high-priority developments as you find them.') : ''}
+    ${sweepBanner(sweep)}
+    ${entries.length === 0 ? emptyState('No entries yet', 'Auto-sweep runs once a day against Bernama/NST/Guardian for your watchlist — or add developments manually as you find them.') : ''}
     <div class="card overflow-hidden">
       <table class="data-table">
-        <thead><tr><th style="width:10%">Date</th><th style="width:16%">Sector</th><th style="width:30%">Headline</th><th style="width:12%">Source</th><th style="width:12%">Priority</th><th style="width:12%">Used in</th><th style="width:8%">Actions</th></tr></thead>
+        <thead><tr><th style="width:9%">Date</th><th style="width:14%">Sector</th><th style="width:27%">Headline</th><th style="width:11%">Source</th><th style="width:9%">Priority</th><th style="width:8%">Origin</th><th style="width:12%">Used in</th><th style="width:10%">Actions</th></tr></thead>
         <tbody>
           ${entries.map((e) => `
             <tr>
@@ -769,9 +773,11 @@ async function renderDailyLog(content) {
               <td>
                 <div class="font-semibold text-slate-800">${escapeHtml(e.headline)}</div>
                 ${e.note ? `<div class="text-xs text-slate-400">${escapeHtml(e.note)}</div>` : ''}
+                ${e.matched_term ? `<div class="text-xs text-slate-400">matched: "${escapeHtml(e.matched_term)}"</div>` : ''}
               </td>
               <td>${e.source_url ? `<a href="${escapeHtml(e.source_url)}" target="_blank" class="text-teal-700 hover:underline">${escapeHtml(e.source_name || 'link')}</a>` : escapeHtml(e.source_name || '—')}</td>
               <td>${priorityBadge(e.priority)}</td>
+              <td>${originBadge(e.origin)}</td>
               <td>${e.used_in_brief_id ? `<a href="#/brief/${e.used_in_brief_id}" class="text-teal-700 hover:underline text-xs">Brief #${e.used_in_brief_id}</a>` : '<span class="text-slate-300 text-xs">not yet</span>'}</td>
               <td>
                 <button class="text-teal-700 hover:text-teal-900 mr-2" data-edit-log="${e.id}" title="Edit"><i class="fas fa-pen"></i></button>
@@ -785,6 +791,17 @@ async function renderDailyLog(content) {
   `
 
   document.getElementById('btn-add-log').addEventListener('click', () => showLogEditModal(null))
+  document.getElementById('btn-run-sweep').addEventListener('click', async (ev) => {
+    ev.target.closest('button').disabled = true
+    ev.target.closest('button').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sweeping…'
+    try {
+      const result = await API.runDailyLogSweep()
+      toast(`Sweep complete — ${result.new_entries} new item(s) logged`)
+    } catch {
+      toast('Sweep failed — feeds may be unreachable right now', 'error')
+    }
+    renderDailyLog(content)
+  })
   content.querySelectorAll('[data-edit-log]').forEach((btn) => btn.addEventListener('click', () => {
     const entry = entries.find((e) => e.id === Number(btn.dataset.editLog))
     showLogEditModal(entry)
@@ -795,6 +812,26 @@ async function renderDailyLog(content) {
     toast('Deleted')
     renderDailyLog(content)
   }))
+}
+
+function sweepBanner(sweep) {
+  if (!sweep) return ''
+  if (sweep.ran) {
+    return `<div class="mb-4 text-sm rounded-lg border border-teal-200 bg-teal-50 text-teal-800 px-4 py-2.5 flex items-center gap-2">
+      <i class="fas fa-circle-check"></i>
+      <span>Auto-sweep just ran against ${sweep.checked_outlets.join(', ')} — <strong>${sweep.new_entries} new item(s)</strong> logged from ${sweep.items_seen} headlines checked.</span>
+    </div>`
+  }
+  return `<div class="mb-4 text-sm rounded-lg border border-slate-200 bg-slate-50 text-slate-500 px-4 py-2.5 flex items-center gap-2">
+    <i class="fas fa-circle-info"></i>
+    <span>${escapeHtml(sweep.reason || 'Sweep already ran today.')} Use "Run Sweep Now" to check again.</span>
+  </div>`
+}
+
+function originBadge(origin) {
+  return origin === 'auto'
+    ? `<span class="badge badge-info"><i class="fas fa-robot"></i> Auto</span>`
+    : `<span class="badge badge-neutral">Manual</span>`
 }
 
 function priorityBadge(p) {

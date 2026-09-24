@@ -7,7 +7,7 @@
   1. **Weekly Briefs Archive** — upload (.docx/.pdf), view, edit, delete briefs; grouped by week with Draft 1 (Thu) / Draft 2 (Fri) / Final stage badges; click into any week to see its rows.
   2. **Compliance Check** — runs the house rule engine against every row: banned words/phrases, impact-cell opener format (Positive/Negative/Neutral/Mixed.), "figure … from X" comparison-base requirement, certainty-overreach wording, generic "the Group" references, associate ownership-% reminders, missing source attribution.
   3. **Redundancy vs Prior Briefs** — Jaccard-similarity text comparison against up to 4 prior briefs, classified as likely duplicate / continuing story / similar topic.
-  4. **Daily News Log** — running log of daily developments (mirrors the Gen Team's daily sweep) so Friday's Draft 2 isn't written cold; entries can be linked to the brief they end up in.
+  4. **Daily News Log** — **auto-populated**: once per calendar day, the app automatically checks Bernama/NST/The Guardian's public RSS feeds against your Al Bukhary entity list + a curated sector-keyword watchlist and logs any matching headline for you (tagged "Auto", with the matched term shown). Runs itself the first time the tab is opened that day — no button needed — plus a "Run Sweep Now" button for an on-demand refresh. Manual entries (tagged "Manual") stay available for anything you read on the paywalled outlets. Entries can be linked to the brief they end up in.
   - Plus an **Al Bukhary Entity Map** admin view (subsidiaries vs associates, ownership %, aliases) used by the compliance engine.
 
 ## URLs
@@ -17,7 +17,8 @@
 
 ## Data Architecture
 - **Storage**: Cloudflare D1 (SQLite) for all structured data; Cloudflare R2 for original uploaded .docx/.pdf files.
-- **Tables**: `briefs`, `brief_rows`, `daily_log`, `entities`, `compliance_issues`, `redundancy_matches` (see `migrations/0001_initial_schema.sql`).
+- **Tables**: `briefs`, `brief_rows`, `daily_log` (+ `origin`/`matched_term` columns), `entities`, `compliance_issues`, `redundancy_matches`, `app_settings` (see `migrations/0001_initial_schema.sql`, `0002_auto_sweep.sql`).
+- **Auto-sweep**: `src/lib/sweep.ts` + `src/lib/watchlist.ts`. Cloudflare Pages hosted deploy has no background cron (`triggers` is unsupported), so this uses a "lazy cron": the sweep runs at most once per Asia/Kuala_Lumpur calendar day, triggered by the first `GET /api/daily-log` request of the day; `POST /api/daily-log/sweep` forces an immediate re-run. Only Bernama/NST/The Guardian have free public RSS — Reuters/The Star/The Edge/Malay Mail/The Sun remain manual-entry + Source Cross-Check search links.
 - **Entity seed data**: `seed.sql` — Al Bukhary Group entity map (MMC Ports + subsidiaries, DRB-HICOM, Malakoff & Gas Malaysia as associates with ownership %, Bernas, Tradewinds, Bank Muamalat, Senai Airport, etc.)
 - **Parsing**: Word files are parsed client-side with `mammoth.js` (table-aware, column-accurate); PDFs are parsed client-side with `pdf.js` using a heuristic line-reconstruction (best-effort — flagged in the UI for manual review).
 

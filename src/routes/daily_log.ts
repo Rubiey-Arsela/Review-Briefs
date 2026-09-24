@@ -1,12 +1,25 @@
 import { Hono } from 'hono'
 import type { AppEnv, DailyLogEntry } from '../lib/types'
+import { runAutoSweep, todayKL } from '../lib/sweep'
 
 const dailyLog = new Hono<AppEnv>()
 
 // GET /api/daily-log?from=YYYY-MM-DD&to=YYYY-MM-DD
+// Automatically runs the once-per-day watchlist sweep (Bernama/NST/Guardian RSS
+// vs. Al Bukhary entities + curated keywords) before returning the log, so opening
+// this tab is enough to keep it current — no manual button press required.
+// Cloudflare Pages hosted deploy has no background cron, so this "lazy trigger"
+// (run on first request of the day) is the closest equivalent available.
 dailyLog.get('/', async (c) => {
   const from = c.req.query('from')
   const to = c.req.query('to')
+
+  let sweep = null
+  try {
+    sweep = await runAutoSweep(c.env.DB)
+  } catch {
+    /* never let a sweep failure block viewing the log */
+  }
 
   let query = 'SELECT * FROM daily_log'
   const params: string[] = []
@@ -21,7 +34,13 @@ dailyLog.get('/', async (c) => {
 
   const stmt = params.length > 0 ? c.env.DB.prepare(query).bind(...params) : c.env.DB.prepare(query)
   const { results } = await stmt.all<DailyLogEntry>()
-  return c.json({ entries: results })
+  return c.json({ entries: results, sweep, today: todayKL() })
+})
+
+// POST /api/daily-log/sweep — force-run the sweep now regardless of last-run date
+dailyLog.post('/sweep', async (c) => {
+  const sweep = await runAutoSweep(c.env.DB, true)
+  return c.json({ sweep })
 })
 
 // POST /api/daily-log

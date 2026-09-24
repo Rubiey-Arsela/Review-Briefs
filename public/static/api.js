@@ -62,8 +62,15 @@ const API = {
 
   // Daily log
   async listDailyLog(params) {
+    // Returns { entries, sweep, today } — GET auto-triggers the once-per-day
+    // watchlist sweep server-side (see src/lib/sweep.ts), so `sweep` tells the UI
+    // what just happened (ran / already-done-today / new entries found).
     const { data } = await axios.get('/api/daily-log', { params })
-    return data.entries
+    return data
+  },
+  async runDailyLogSweep() {
+    const { data } = await axios.post('/api/daily-log/sweep')
+    return data.sweep
   },
   async createDailyLog(payload) {
     const { data } = await axios.post('/api/daily-log', payload)
