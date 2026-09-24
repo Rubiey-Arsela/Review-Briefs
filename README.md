@@ -1,21 +1,40 @@
-```txt
-npm install
-npm run dev
-```
+# Maida Vale — Brief QA & Continuity Desk
 
-```txt
-npm run deploy
-```
+## Project Overview
+- **Name**: Maida Vale QA & Continuity Desk
+- **Goal**: Companion QA tool for the weekly Maida Vale Weekly Brief (Al Bukhary Group). Lets the consultant review each week's brief (Thursday Draft 1 → Friday Draft 2) before it goes to the director, catching house-rule violations and repeated news before submission.
+- **4 Modules**:
+  1. **Weekly Briefs Archive** — upload (.docx/.pdf), view, edit, delete briefs; grouped by week with Draft 1 (Thu) / Draft 2 (Fri) / Final stage badges; click into any week to see its rows.
+  2. **Compliance Check** — runs the house rule engine against every row: banned words/phrases, impact-cell opener format (Positive/Negative/Neutral/Mixed.), "figure … from X" comparison-base requirement, certainty-overreach wording, generic "the Group" references, associate ownership-% reminders, missing source attribution.
+  3. **Redundancy vs Prior Briefs** — Jaccard-similarity text comparison against up to 4 prior briefs, classified as likely duplicate / continuing story / similar topic.
+  4. **Daily News Log** — running log of daily developments (mirrors the Gen Team's daily sweep) so Friday's Draft 2 isn't written cold; entries can be linked to the brief they end up in.
+  - Plus an **Al Bukhary Entity Map** admin view (subsidiaries vs associates, ownership %, aliases) used by the compliance engine.
 
-[For generating/synchronizing types based on your Worker configuration run](https://developers.cloudflare.com/workers/wrangler/commands/#types):
+## URLs
+- **Local dev preview**: https://3000-i77uenqd0jq85mc5rvhj8-2e77fc33.sandbox.novita.ai (sandbox dev server — not yet deployed to production)
+- **Live Brief Site (companion, separate app)**: https://maida-vale-weekly-brief.pages.dev
+- **Production**: not yet deployed — pending Cloudflare API token + decision on deploy target (own project vs. same project as the live brief site)
 
-```txt
-npm run cf-typegen
-```
+## Data Architecture
+- **Storage**: Cloudflare D1 (SQLite) for all structured data; Cloudflare R2 for original uploaded .docx/.pdf files.
+- **Tables**: `briefs`, `brief_rows`, `daily_log`, `entities`, `compliance_issues`, `redundancy_matches` (see `migrations/0001_initial_schema.sql`).
+- **Entity seed data**: `seed.sql` — Al Bukhary Group entity map (MMC Ports + subsidiaries, DRB-HICOM, Malakoff & Gas Malaysia as associates with ownership %, Bernas, Tradewinds, Bank Muamalat, Senai Airport, etc.)
+- **Parsing**: Word files are parsed client-side with `mammoth.js` (table-aware, column-accurate); PDFs are parsed client-side with `pdf.js` using a heuristic line-reconstruction (best-effort — flagged in the UI for manual review).
 
-Pass the `CloudflareBindings` as generics when instantiation `Hono`:
+## User Guide
+1. Go to **Weekly Briefs (Archive)** → **Upload** → fill in week label, draft stage (Draft 1 Thu / Draft 2 Fri / Final), period dates, title, and drag in the .docx or .pdf. The file is parsed in-browser and rows are pre-filled.
+2. Click into the week to view/edit/delete individual rows, or edit/delete the whole brief.
+3. Click **Run Check** to execute the Compliance and Redundancy checks; review flagged issues under the **Compliance** and **Redundancy** tabs before sending to the director.
+4. Use **Source Cross-Check** tab on a brief to get one-click search links across all 8 outlets (Reuters, The Star, The Edge, Bernama, Malay Mail, NST, The Sun, The Guardian), plus live headlines for the outlets with public feeds (Bernama, NST, The Guardian).
+5. Use **Daily News Log** through the week to capture developments as they happen, so Friday's Draft 2 update is quick to assemble.
+6. Maintain the **Entity Map** as Al Bukhary's group structure changes.
 
-```ts
-// src/index.ts
-const app = new Hono<{ Bindings: CloudflareBindings }>()
-```
+## Deployment
+- **Platform**: Cloudflare Pages (Hono + D1 + R2)
+- **Status**: ❌ Not yet deployed to production — currently local-dev only (PM2 + `wrangler pages dev --local`)
+- **Tech Stack**: Hono + TypeScript + Vite, D1 (SQLite), R2, vanilla-JS SPA frontend (Tailwind CDN), mammoth.js + pdf.js for client-side document parsing
+- **Outstanding before production deploy**:
+  - Create real D1 database (`wrangler d1 create maida-vale-qa-production`) and R2 bucket, replace the placeholder `database_id` in `wrangler.jsonc`
+  - Requires a Cloudflare API token (not yet supplied) — use the `cf-byok-deploy` or `gsk-hosted-deploy` skill when ready
+  - Confirm with user: deploy as its own Pages project, or alongside the existing `maida-vale-weekly-brief` site
+- **Last Updated**: 2026-09-24
