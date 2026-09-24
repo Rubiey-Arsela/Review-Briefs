@@ -1,7 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "webapp",
-  "main": "src/index.tsx",
+  "name": "maida-vale-qa",
   "compatibility_date": "2026-09-17",
   "pages_build_output_dir": "./dist",
   "compatibility_flags": [
@@ -11,7 +10,7 @@
     {
       "binding": "DB",
       "database_name": "maida-vale-qa-production",
-      "database_id": "local-placeholder-will-be-set-on-deploy"
+      "database_id": "a7f6976f-9b27-418c-93d6-77f6570fe7cf"
     }
   ],
   "r2_buckets": [
